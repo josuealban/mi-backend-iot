@@ -12,11 +12,20 @@ import { ApiResponse } from 'src/interfaces/api-response-interface';
 export class UsersService {
   private readonly logger = new Logger(UsersService.name);
 
+  private buildResponse<T>(success: boolean, message: string, data: T, statusCode: number): ApiResponse<T> {
+    return {
+      success,
+      message,
+      data,
+      statusCode
+    }
+  }
+
   constructor(
     private readonly prismaService: PrismaService,
   ) { }
 
-  async findAll() {
+  async findAll(): Promise<ApiResponse<any>> {
     try {
       const users = await this.prismaService.user.findMany({
         select: {
@@ -28,7 +37,7 @@ export class UsersService {
         }
       });
 
-      return users;
+      return this.buildResponse(true, 'Usuarios obtenidos exitosamente', users, 200);
 
     } catch (error) {
       this.logger.error(`Error en findAll: ${error.message}`, error.stack);
@@ -56,12 +65,7 @@ export class UsersService {
         throw new NotFoundException(`Usuario con ID ${id} no encontrado`);
       }
 
-      return {
-        success: true,
-        message: 'Usuario encontrado exitosamente',
-        data: user,
-        statusCode: 200
-      };
+      return this.buildResponse(true, 'Usuario encontrado exitosamente', user, 200);
 
     } catch (error) {
       this.logger.error(`Error en findOne: ${error.message}`, error.stack);
@@ -82,16 +86,8 @@ export class UsersService {
     }
   }
 
-  async desactive(id: number) {
+  async desactive(id: number): Promise<ApiResponse<any>> {
     try {
-      const existingUser = await this.prismaService.user.findUnique({
-        where: { id }
-      });
-
-      if (!existingUser) {
-        throw new NotFoundException(`Usuario con ID ${id} no encontrado`);
-      }
-
       const deactivatedUser = await this.prismaService.user.update({
         where: { id },
         data: { isActive: false },
@@ -104,10 +100,7 @@ export class UsersService {
         }
       });
 
-      return {
-        message: 'Usuario desactivado exitosamente',
-        user: deactivatedUser
-      };
+      return this.buildResponse(true, 'Usuario desactivado exitosamente', deactivatedUser, 200);
 
     } catch (error) {
       this.logger.error(`Error en desactive: ${error.message}`, error.stack);
