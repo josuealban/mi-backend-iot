@@ -5,7 +5,14 @@ import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import { AppModule } from './app.module';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  // Configurar niveles de log según el ambiente
+  const logLevels: ('error' | 'warn' | 'log' | 'debug' | 'verbose')[] = process.env.NODE_ENV === 'production'
+    ? ['error', 'warn', 'log']  // Producción: solo errores, warnings y logs importantes
+    : ['error', 'warn', 'log', 'debug', 'verbose']; // Desarrollo: todos los niveles
+
+  const app = await NestFactory.create(AppModule, {
+    logger: logLevels,
+  });
 
   // Habilitar CORS para permitir conexiones desde ESP32
   app.enableCors({
