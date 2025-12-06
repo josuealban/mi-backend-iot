@@ -1,0 +1,71 @@
+import { Controller, Post, Body } from '@nestjs/common';
+import { ApiTags, ApiOperation, ApiResponse, ApiBody } from '@nestjs/swagger';
+import { AuthService } from './auth.service';
+import { CreateUserDto } from 'src/users/dto/create-user.dto';
+import { LoginDto } from './dto/login-dto';
+
+@ApiTags('auth')
+@Controller('auth')
+export class AuthController {
+  constructor(private readonly authService: AuthService) { }
+
+  @Post('register')
+  @ApiOperation({
+    summary: 'Registrar nuevo usuario',
+    description: 'Crea un nuevo usuario en el sistema y retorna los tokens de autenticación'
+  })
+  @ApiResponse({
+    status: 201,
+    description: 'Usuario creado exitosamente',
+    schema: {
+      example: {
+        user: {
+          id: 1,
+          username: 'John Doe',
+          email: 'john.doe@example.com',
+          isActive: true,
+          createdAt: '2025-12-02T16:00:00.000Z'
+        },
+        access_token: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...',
+        refresh_token: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...'
+      }
+    }
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'Datos inválidos o email ya registrado'
+  })
+  create(@Body() createUserDto: CreateUserDto) {
+    return this.authService.register(createUserDto);
+  }
+
+  @Post('login')
+  @ApiOperation({
+    summary: 'Iniciar sesión',
+    description: 'Autentica un usuario y retorna los tokens de acceso'
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Login exitoso',
+    schema: {
+      example: {
+        user: {
+          id: 1,
+          username: 'John Doe',
+          email: 'john.doe@example.com',
+          isActive: true
+        },
+        access_token: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...',
+        refresh_token: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...'
+      }
+    }
+  })
+  @ApiResponse({
+    status: 401,
+    description: 'Credenciales inválidas'
+  })
+  login(@Body() loginDto: LoginDto) {
+    return this.authService.login(loginDto);
+  }
+}
+
