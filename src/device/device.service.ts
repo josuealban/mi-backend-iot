@@ -9,16 +9,36 @@ import { CreateDeviceDto } from './dto/create-device.dto';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { randomUUID } from 'crypto';
 import { Prisma } from '@prisma/client';
+import { ApiResponse } from 'src/interfaces/api-response-interface';
 
 @Injectable()
 export class DeviceService {
   private readonly logger = new Logger(DeviceService.name);
 
+  private readonly deviceDataSelect = {
+    id: true,
+    name: true,
+    description: true,
+    location: true,
+    deviceKey: true,
+    userId: true,
+    createdAt: true,
+  }
+
+  private buildResponse<T>(success: boolean, message: string, data: T, statusCode: number): ApiResponse<T> {
+    return {
+      success,
+      message,
+      data,
+      statusCode
+    }
+  }
+
   constructor(
     private readonly prismaService: PrismaService,
   ) { }
 
-  async create(createDeviceDto: CreateDeviceDto, userId: number) {
+  async create(createDeviceDto: CreateDeviceDto, userId: number): Promise<ApiResponse<any>> {
     try {
       const device = await this.prismaService.device.create({
         data: {
@@ -26,18 +46,10 @@ export class DeviceService {
           deviceKey: this.generateDeviceKey(),
           userId: userId
         },
-        select: {
-          id: true,
-          name: true,
-          description: true,
-          location: true,
-          deviceKey: true,
-          userId: true,
-          createdAt: true,
-        }
+        select: this.deviceDataSelect
       });
 
-      return device;
+      return this.buildResponse(true, 'Dispositivo creado exitosamente', device, 201);
 
     } catch (error) {
       this.logger.error(`Error en create: ${error.message} `, error.stack);
@@ -55,22 +67,13 @@ export class DeviceService {
     }
   }
 
-  async findAll() {
+  async findAll(): Promise<ApiResponse<any>> {
     try {
-      const devices = await this.prismaService.device.findMany({
-        select: {
-          id: true,
-          name: true,
-          description: true,
-          location: true,
-          deviceKey: true,
-          userId: true,
-          createdAt: true,
-        }
-      });
+      const devices = await this.prismaService.device.findMany(
+        { select: this.deviceDataSelect }
+      );
 
-      return devices;
-
+      return this.buildResponse(true, 'Dispositivos obtenidos exitosamente', devices, 200);
     } catch (error) {
       this.logger.error(`Error en findAll: ${error.message} `, error.stack);
 
@@ -82,34 +85,14 @@ export class DeviceService {
 
   async desactive(id: number) {
     try {
-      // Verificar que el dispositivo existe
-      const existingDevice = await this.prismaService.device.findUnique({
-        where: { id }
-      });
-
-      if (!existingDevice) {
-        throw new NotFoundException(`Dispositivo con ID ${id} no encontrado`);
-      }
-
       // Desactivar el dispositivo
       const deactivatedDevice = await this.prismaService.device.update({
         where: { id },
         data: { isActive: false },
-        select: {
-          id: true,
-          name: true,
-          description: true,
-          location: true,
-          deviceKey: true,
-          userId: true,
-          createdAt: true,
-        }
+        select: this.deviceDataSelect
       });
 
-      return {
-        message: 'Dispositivo desactivado exitosamente',
-        device: deactivatedDevice
-      };
+      return this.buildResponse(true, 'Dispositivo desactivado exitosamente', deactivatedDevice, 200);
 
     } catch (error) {
       this.logger.error(`Error en desactive: ${error.message} `, error.stack);
@@ -126,11 +109,11 @@ export class DeviceService {
         }
       }
 
-      throw new InternalServerErrorException('Error al desactivar el dispositivo');
+      return this.buildResponse(false, 'Error al desactivar el dispositivo', null, 500);
     }
   }
 
-  async createSettings(deviceId: number, settingsDto: any) {
+  async createSettings(deviceId: number, settingsDto: any): Promise<ApiResponse<any>> {
     try {
       // Verificar que el dispositivo existe
       const device = await this.prismaService.device.findUnique({
@@ -166,17 +149,20 @@ export class DeviceService {
       });
 
       this.logger.log(`Configuración creada para dispositivo ${deviceId} `);
-      return settings;
+
+      return this.buildResponse(true, 'Configuración creada exitosamente', settings, 201);
+
     } catch (error) {
       if (error instanceof NotFoundException || error instanceof ConflictException) {
         throw error;
       }
       this.logger.error(`Error al crear configuración: ${error.message} `);
-      throw new InternalServerErrorException('Error al crear la configuración');
+
+      return this.buildResponse(false, 'Error al crear la configuración', null, 500);
     }
   }
 
-  async updateSettings(deviceId: number, settingsDto: any) {
+  async updateSettings(deviceId: number, settingsDto: any): Promise<ApiResponse<any>> {
     try {
       // Verificar que existe la configuración
       const existing = await this.prismaService.deviceSettings.findUnique({
@@ -203,17 +189,17 @@ export class DeviceService {
       });
 
       this.logger.log(`Configuración actualizada para dispositivo ${deviceId} `);
-      return settings;
+      return this.buildResponse(true, 'Configuración actualizada exitosamente', settings, 200);
     } catch (error) {
       if (error instanceof NotFoundException) {
         throw error;
       }
       this.logger.error(`Error al actualizar configuración: ${error.message} `);
-      throw new InternalServerErrorException('Error al actualizar la configuración');
+      return this.buildResponse(false, 'Error al actualizar la configuración', null, 500);
     }
   }
 
-  async getSettings(deviceId: number) {
+  async getSettings(deviceId: number): Promise<ApiResponse<any>> {
     try {
       const settings = await this.prismaService.deviceSettings.findUnique({
         where: { deviceId },
@@ -223,13 +209,16 @@ export class DeviceService {
         throw new NotFoundException(`No se encontró configuración para el dispositivo ${deviceId} `);
       }
 
-      return settings;
+      return this.buildResponse(true, 'Configuración obtenida exitosamente', settings, 200);
+
     } catch (error) {
+
       if (error instanceof NotFoundException) {
         throw error;
       }
       this.logger.error(`Error al obtener configuración: ${error.message} `);
-      throw new InternalServerErrorException('Error al obtener la configuración');
+
+      return this.buildResponse(false, 'Error al obtener la configuración', null, 500);
     }
   }
 
@@ -240,5 +229,3 @@ export class DeviceService {
     return randomUUID();
   }
 }
-
-
