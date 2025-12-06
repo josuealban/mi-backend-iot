@@ -11,13 +11,13 @@
 #include <ArduinoJson.h>
 
 // Configuración WiFi
-const char* WIFI_SSID = "MarcoBuri";
-const char* WIFI_PASSWORD = "20032006";
+const char* WIFI_SSID = "TU_WIFI_SSID";
+const char* WIFI_PASSWORD = "TU_WIFI_PASSWORD";
 
 // Configuración Servidor
-const char* SERVER_HOST = "192.168.18.182";
+const char* SERVER_HOST = "TU_SERVER_HOST"; // Ejemplo: "192.168.18.182"
 const int SERVER_PORT = 3000;
-const char* DEVICE_KEY = "00d6644c-3785-4a2d-ae71-1ec6c81b1a9a";
+const char* DEVICE_KEY = "TU_DEVICE_KEY";
 
 // URLs del servidor
 String sensorDataUrl;
