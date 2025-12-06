@@ -1,0 +1,156 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  id             Int            @id @default(autoincrement())
+  username       String         @unique @db.VarChar(100)
+  email          String         @unique @db.VarChar(150)
+  password       String         @map("password_hash") @db.VarChar(255)
+  isActive       Boolean        @default(true) @map("is_active")
+  lastLogin      DateTime?      @map("last_login")
+  createdAt      DateTime       @default(now()) @map("created_at")
+  updatedAt      DateTime       @updatedAt @map("updated_at")
+  resolvedAlerts Alert[]        @relation("ResolvedBy")
+  devices        Device[]
+  notifications  Notification[]
+
+  @@index([email], map: "idx_users_email")
+  @@index([username], map: "idx_users_username")
+  @@map("users")
+}
+
+model Device {
+  id             Int             @id @default(autoincrement())
+  userId         Int             @map("user_id")
+  name           String          @db.VarChar(100)
+  description    String?
+  deviceKey      String          @unique @map("device_key") @db.VarChar(255)
+  status         DeviceStatus    @default(OFFLINE)
+  location       String?         @db.VarChar(255)
+  lastSeen       DateTime?       @map("last_seen")
+  createdAt      DateTime        @default(now()) @map("created_at")
+  updatedAt      DateTime        @updatedAt @map("updated_at")
+  isActive       Boolean         @default(true) @map("is_active")
+  alerts         Alert[]
+  deviceSettings DeviceSettings?
+  user           User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sensorData     SensorData[]
+
+  @@index([userId], map: "idx_devices_user")
+  @@index([deviceKey], map: "idx_devices_key")
+  @@index([status], map: "idx_devices_status")
+  @@map("devices")
+}
+
+model SensorData {
+  id                  Int      @id @default(autoincrement())
+  deviceId            Int      @map("device_id")
+  rawValue            Int      @map("raw_value")
+  voltage             Float?
+  gasConcentrationPpm Float?   @map("gas_concentration_ppm")
+  rsRoRatio           Float?   @map("rs_ro_ratio")
+  temperature         Float?
+  humidity            Float?
+  thresholdPassed     Boolean  @default(false) @map("threshold_passed")
+  readAt              DateTime @default(now()) @map("read_at")
+  createdAt           DateTime @default(now()) @map("created_at")
+  device              Device   @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+
+  @@index([deviceId], map: "idx_sensor_device")
+  @@index([createdAt], map: "idx_sensor_created")
+  @@index([deviceId, createdAt], map: "idx_sensor_device_time")
+  @@index([thresholdPassed], map: "idx_sensor_threshold")
+  @@map("sensor_data")
+}
+
+model DeviceSettings {
+  id                   Int      @id @default(autoincrement())
+  deviceId             Int      @unique @map("device_id")
+  gasThresholdPpm      Float    @default(300.0) @map("gas_threshold_ppm")
+  voltageThreshold     Float    @default(1.5) @map("voltage_threshold")
+  buzzerEnabled        Boolean  @default(true) @map("buzzer_enabled")
+  ledEnabled           Boolean  @default(true) @map("led_enabled")
+  notifyUser           Boolean  @default(true) @map("notify_user")
+  notificationCooldown Int      @default(300) @map("notification_cooldown")
+  autoShutoff          Boolean  @default(false) @map("auto_shutoff")
+  calibrationR0        Float    @default(10.0) @map("calibration_r0")
+  updatedAt            DateTime @updatedAt @map("updated_at")
+  device               Device   @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+
+  @@index([deviceId], map: "idx_settings_device")
+  @@map("device_settings")
+}
+
+model Alert {
+  id            Int            @id @default(autoincrement())
+  deviceId      Int            @map("device_id")
+  alertType     AlertType      @map("alert_type")
+  severity      AlertSeverity  @default(MEDIUM)
+  message       String         @db.VarChar(255)
+  gasValuePpm   Float?         @map("gas_value_ppm")
+  voltageValue  Float?         @map("voltage_value")
+  resolved      Boolean        @default(false)
+  resolvedAt    DateTime?      @map("resolved_at")
+  resolvedBy    Int?           @map("resolved_by")
+  createdAt     DateTime       @default(now()) @map("created_at")
+  device        Device         @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  resolver      User?          @relation("ResolvedBy", fields: [resolvedBy], references: [id])
+  notifications Notification[]
+
+  @@index([deviceId], map: "idx_alerts_device")
+  @@index([createdAt], map: "idx_alerts_created")
+  @@index([resolved], map: "idx_alerts_resolved")
+  @@index([deviceId, resolved, createdAt], map: "idx_alerts_active")
+  @@map("alerts")
+}
+
+model Notification {
+  id        Int              @id @default(autoincrement())
+  userId    Int              @map("user_id")
+  alertId   Int?             @map("alert_id")
+  title     String           @db.VarChar(255)
+  message   String
+  type      NotificationType @default(ALERT)
+  read      Boolean          @default(false)
+  sent      Boolean          @default(false)
+  createdAt DateTime         @default(now()) @map("created_at")
+  alert     Alert?           @relation(fields: [alertId], references: [id])
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId], map: "idx_notif_user")
+  @@index([userId, read], map: "idx_notif_unread")
+  @@index([createdAt], map: "idx_notif_created")
+  @@map("notifications")
+}
+
+enum DeviceStatus {
+  ONLINE
+  OFFLINE
+  MAINTENANCE
+}
+
+enum AlertType {
+  GAS_DETECTED
+  SENSOR_ERROR
+  OFFLINE
+  MAINTENANCE_REQUIRED
+}
+
+enum AlertSeverity {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum NotificationType {
+  ALERT
+  INFO
+  WARNING
+  SUCCESS
+}
