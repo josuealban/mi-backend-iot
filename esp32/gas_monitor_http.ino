@@ -1,14 +1,16 @@
 /*
- * ESP32 - Monitor de Gas MQ2
+ * ESP32 - Monitor de Gas MQ2 + DHT11
  * Comunicación HTTP (Simple y Confiable)
  * 
  * Este código usa HTTP POST para enviar datos cada 5 segundos
  * y HTTP GET para obtener comandos del servidor
+ * Incluye sensor DHT11 para temperatura y humedad
  */
 
 #include <WiFi.h>
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
+#include <DHT.h>
 
 // Configuración WiFi
 const char* WIFI_SSID = "TU_WIFI_SSID";
@@ -28,6 +30,11 @@ String configUrl;
 const int MQ2_PIN = 34;
 const int LED_PIN = 2;
 const int BUZZER_PIN = 4;
+const int DHT_PIN = 15;  // Pin para DHT11
+
+// Configuración DHT11
+#define DHTTYPE DHT11
+DHT dht(DHT_PIN, DHTTYPE);
 
 // Configuración Sensor
 const float RL_VALUE = 5.0;
@@ -136,11 +143,23 @@ void sendSensorData() {
     return;
   }
   
+  // Leer sensor MQ2
   int rawValue = readMQ2Raw();
   float voltage = adcToVoltage(rawValue);
   float rs = calculateRs(voltage);
   float ppm = calculatePPM(rs);
   float ratio = (calibrationR0 > 0) ? rs / calibrationR0 : 0;
+  
+  // Leer sensor DHT11
+  float temperature = dht.readTemperature();
+  float humidity = dht.readHumidity();
+  
+  // Verificar si las lecturas del DHT11 son válidas
+  if (isnan(temperature) || isnan(humidity)) {
+    Serial.println("[DHT11] Error leyendo sensor");
+    temperature = 0;
+    humidity = 0;
+  }
   
   Serial.println("\n========== LECTURA DEL SENSOR ==========");
   Serial.printf("Raw ADC: %d\n", rawValue);
@@ -148,6 +167,8 @@ void sendSensorData() {
   Serial.printf("Rs: %.2f kΩ\n", rs);
   Serial.printf("Rs/R0: %.3f\n", ratio);
   Serial.printf("Gas: %.2f PPM\n", ppm);
+  Serial.printf("Temperatura: %.1f °C\n", temperature);
+  Serial.printf("Humedad: %.1f %%\n", humidity);
   Serial.println("========================================");
   
   // Crear JSON
@@ -157,6 +178,8 @@ void sendSensorData() {
   doc["voltage"] = voltage;
   doc["gasConcentrationPpm"] = ppm;
   doc["rsRoRatio"] = ratio;
+  doc["temperature"] = temperature;
+  doc["humidity"] = humidity;
   
   String jsonData;
   serializeJson(doc, jsonData);
@@ -170,7 +193,6 @@ void sendSensorData() {
   
   if (httpCode > 0) {
     String response = http.getString();
-    Serial.printf("[HTTP] ✅ Respuesta del servidor (%d)\n", httpCode);
     
     // Procesar respuesta
     DynamicJsonDocument responseDoc(512);
@@ -184,14 +206,6 @@ void sendSensorData() {
         
         digitalWrite(LED_PIN, ledState ? HIGH : LOW);
         digitalWrite(BUZZER_PIN, buzzerState ? HIGH : LOW);
-        
-        Serial.printf("[COMMAND] LED: %s, Buzzer: %s\n", 
-                     ledState ? "ON" : "OFF",
-                     buzzerState ? "ON" : "OFF");
-        
-        if (command.containsKey("message")) {
-          Serial.printf("[ALERT] %s\n", command["message"].as<const char*>());
-        }
       }
     }
   } else {
@@ -236,7 +250,7 @@ void setup() {
   delay(1000);
   
   Serial.println("\n========================================");
-  Serial.println("  ESP32 - Monitor de Gas MQ2");
+  Serial.println("  ESP32 - Monitor de Gas MQ2 + DHT11");
   Serial.println("  Comunicación HTTP");
   Serial.println("========================================");
   
@@ -246,6 +260,10 @@ void setup() {
   
   digitalWrite(LED_PIN, LOW);
   digitalWrite(BUZZER_PIN, LOW);
+  
+  // Inicializar DHT11
+  dht.begin();
+  Serial.println("\n[DHT11] Sensor inicializado");
   
   connectWiFi();
   
