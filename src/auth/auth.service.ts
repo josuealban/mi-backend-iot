@@ -68,8 +68,8 @@ export class AuthService {
 
       return {
         user,
-        access_token: accessToken,
-        refresh_token: refreshToken
+        accessToken: accessToken,
+        refreshToken: refreshToken
       };
 
     } catch (error) {
@@ -149,8 +149,8 @@ export class AuthService {
           email: user.email,
           isActive: user.isActive
         },
-        access_token: accessToken,
-        refresh_token: refreshToken
+        accessToken: accessToken,
+        refreshToken: refreshToken
       };
 
     } catch (error) {

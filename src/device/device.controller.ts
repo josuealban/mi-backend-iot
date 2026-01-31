@@ -87,6 +87,32 @@ export class DeviceController {
     return this.deviceService.findAll();
   }
 
+  @Get(':id')
+  @ApiOperation({
+    summary: 'Obtener dispositivo por ID',
+    description: 'Retorna la información completa de un dispositivo con sus datos de sensores y alertas recientes'
+  })
+  @ApiParam({
+    name: 'id',
+    description: 'ID del dispositivo',
+    example: 1
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Dispositivo encontrado exitosamente'
+  })
+  @ApiResponse({
+    status: 404,
+    description: 'Dispositivo no encontrado'
+  })
+  @ApiResponse({
+    status: 401,
+    description: 'No autorizado'
+  })
+  findOne(@Param('id') id: string) {
+    return this.deviceService.findOne(+id);
+  }
+
   @Patch(':id/deactivate')
   @ApiOperation({
     summary: 'Desactivar dispositivo',
@@ -195,4 +221,3 @@ export class DeviceController {
     return this.deviceService.getSettings(+id);
   }
 }
-

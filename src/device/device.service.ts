@@ -83,6 +83,49 @@ export class DeviceService {
     }
   }
 
+  // ⭐ NUEVO MÉTODO - DEBE ESTAR AQUÍ
+  async findOne(id: number): Promise<ApiResponse<any>> {
+    try {
+      const device = await this.prismaService.device.findUnique({
+        where: { id },
+        include: {
+          deviceSettings: true,
+          sensorData: {
+            orderBy: { createdAt: 'desc' },
+            take: 50, // Últimas 50 lecturas
+          },
+          alerts: {
+            where: { resolved: false },
+            orderBy: { createdAt: 'desc' },
+            take: 10, // Últimas 10 alertas no resueltas
+          },
+        },
+      });
+
+      if (!device) {
+        throw new NotFoundException(`Dispositivo con ID ${id} no encontrado`);
+      }
+
+      return this.buildResponse(true, 'Dispositivo obtenido exitosamente', device, 200);
+    } catch (error) {
+      this.logger.error(`Error en findOne: ${error.message}`, error.stack);
+
+      if (error instanceof NotFoundException) {
+        throw error;
+      }
+
+      if (error instanceof Prisma.PrismaClientKnownRequestError) {
+        if (error.code === 'P2025') {
+          throw new NotFoundException(`Dispositivo con ID ${id} no encontrado`);
+        }
+      }
+
+      throw new InternalServerErrorException(
+        'Error al obtener el dispositivo. Por favor, intenta de nuevo.'
+      );
+    }
+  }
+
   async desactive(id: number) {
     try {
       // Desactivar el dispositivo
