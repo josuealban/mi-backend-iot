@@ -6,14 +6,25 @@ import { PrismaService } from 'src/prisma/prisma.service';
 @Injectable()
 export class NotificationsService {
 
-  constructor( private readonly prismaService : PrismaService) {}
+  constructor(private readonly prismaService: PrismaService) {}
 
   create(createNotificationDto: CreateNotificationDto) {
     return 'This action adds a new notification';
   }
 
   findAll() {
-    return this.prismaService.notification.findMany();
+    return this.prismaService.notification.findMany({
+      include: {
+        alert: {
+          include: {
+            device: true
+          }
+        }
+      },
+      orderBy: {
+        createdAt: 'desc'
+      }
+    });
   }
 
   findOne(id: number) {

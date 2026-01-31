@@ -1,34 +1,49 @@
-import { Controller, Get, Post, Body, Patch, Param, Delete } from '@nestjs/common';
-import { NotificationsService } from './notifications.service';
-import { CreateNotificationDto } from './dto/create-notification.dto';
-import { UpdateNotificationDto } from './dto/update-notification.dto';
+import { Controller, Post, Body, UseGuards, Get } from '@nestjs/common';
+import { RegisterDeviceTokenUseCase } from './application/register-device-token.use-case';
+import { SendNotificationUseCase } from './application/send-notification.use-case';
+import { GetNotificationsUseCase } from './application/get-notifications.use-case';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { GetUser } from '../auth/decorators/get-user.decorator';
 
 @Controller('notifications')
 export class NotificationsController {
-  constructor(private readonly notificationsService: NotificationsService) {}
+  constructor(
+    private readonly registerDeviceTokenUseCase: RegisterDeviceTokenUseCase,
+    private readonly sendNotificationUseCase: SendNotificationUseCase,
+    private readonly getNotificationsUseCase: GetNotificationsUseCase,
+  ) { }
 
-  @Post()
-  create(@Body() createNotificationDto: CreateNotificationDto) {
-    return this.notificationsService.create(createNotificationDto);
+  @Post('register-token')
+  @UseGuards(JwtAuthGuard)
+  async registerDeviceToken(
+    @GetUser('id') userId: number,
+    @Body() body: { token: string }
+  ) {
+    await this.registerDeviceTokenUseCase.execute(userId, body.token);
+    return { success: true, message: 'Token registered successfully' };
   }
 
   @Get()
-  findAll() {
-    return this.notificationsService.findAll();
+  @UseGuards(JwtAuthGuard)
+  async getNotifications(@GetUser('id') userId: number) {
+    return this.getNotificationsUseCase.execute(userId);
   }
 
-  @Get(':id')
-  findOne(@Param('id') id: string) {
-    return this.notificationsService.findOne(+id);
-  }
-
-  @Patch(':id')
-  update(@Param('id') id: string, @Body() updateNotificationDto: UpdateNotificationDto) {
-    return this.notificationsService.update(+id, updateNotificationDto);
-  }
-
-  @Delete(':id')
-  remove(@Param('id') id: string) {
-    return this.notificationsService.remove(+id);
+  @Post('send-test')
+  async sendTestNotification(
+    @Body()
+    body: {
+      userId: number;
+      title: string;
+      body: string;
+      data?: Record<string, string>;
+    },
+  ) {
+    return this.sendNotificationUseCase.execute(
+      body.userId,
+      body.title,
+      body.body,
+      body.data,
+    );
   }
 }
