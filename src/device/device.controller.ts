@@ -83,8 +83,8 @@ export class DeviceController {
     status: 401,
     description: 'No autorizado'
   })
-  findAll() {
-    return this.deviceService.findAll();
+  findAll(@GetUser('id') userId: number) {
+    return this.deviceService.findAll(userId);
   }
 
   @Get(':id')

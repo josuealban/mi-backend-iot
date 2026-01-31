@@ -2,12 +2,16 @@ import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { SensorReadingDto } from './dto/sensor-reading.dto';
 import { AlertType, AlertSeverity, NotificationType } from '@prisma/client';
+import { SendNotificationUseCase } from '../notifications/application/send-notification.use-case';
 
 @Injectable()
 export class SensorDataService {
     private readonly logger = new Logger(SensorDataService.name);
 
-    constructor(private prisma: PrismaService) { }
+    constructor(
+        private prisma: PrismaService,
+        private sendNotificationUseCase: SendNotificationUseCase
+    ) { }
 
     /**
      * Procesa y almacena una lectura del sensor
@@ -134,17 +138,43 @@ export class SensorDataService {
             });
 
             // Crear notificación para el usuario
-            await this.prisma.notification.create({
+            const severityText = this.getSeverityText(severity);
+            const notification = await this.prisma.notification.create({
                 data: {
                     userId: device.userId,
                     alertId: alert.id,
-                    title: `⚠️ Gas Alert - ${device.name}`,
-                    message: `Gas concentration of ${data.gasConcentrationPpm?.toFixed(2)} PPM detected at ${device.location || 'unknown location'}`,
+                    title: `Alerta de Gas - ${severityText} - ${device.name}`,
+                    message: `Gas: ${data.gasConcentrationPpm?.toFixed(2)} PPM` +
+                        (data.temperature ? ` | Temp: ${data.temperature.toFixed(1)}°C` : '') +
+                        (data.humidity ? ` | Hum: ${data.humidity.toFixed(1)}%` : ''),
                     type: NotificationType.ALERT,
                     read: false,
                     sent: true,
                 },
             });
+
+            // Enviar notificación push al dispositivo del usuario
+            try {
+                const notificationBody = `Gas: ${data.gasConcentrationPpm?.toFixed(2)} PPM` +
+                    (data.temperature ? ` | Temp: ${data.temperature.toFixed(1)}°C` : '') +
+                    (data.humidity ? ` | Humidity: ${data.humidity.toFixed(1)}%` : '');
+
+                await this.sendNotificationUseCase.execute(
+                    device.userId,
+                    `Alerta de Gas - ${severityText} - ${device.name}`,
+                    notificationBody,
+                    {
+                        deviceId: device.id.toString(),
+                        alertId: alert.id.toString(),
+                        gasLevel: data.gasConcentrationPpm?.toFixed(2) || '0',
+                        severity: severity,
+                    }
+                );
+                this.logger.log(`Push notification sent to user ${device.userId} for alert ${alert.id}`);
+            } catch (error) {
+                this.logger.error(`Failed to send push notification: ${error.message}`);
+                // No lanzar error, la alerta ya fue creada en BD
+            }
 
             this.logger.warn(
                 `ALERT CREATED: Device ${device.name} - Gas ${data.gasConcentrationPpm?.toFixed(2)} PPM - Severity: ${severity}`
@@ -156,14 +186,36 @@ export class SensorDataService {
 
     /**
      * Determina la severidad de la alerta basada en la concentración de gas
+     * Umbrales basados en estándares de seguridad para gases combustibles:
+     * - BAJO: 50-150 PPM (Detección temprana)
+     * - MEDIO: 150-300 PPM (Precaución)
+     * - ALTO: 300-500 PPM (Peligro)
+     * - CRÍTICO: >500 PPM (Evacuación inmediata)
      */
     private determineSeverity(gasPpm?: number): AlertSeverity {
         if (!gasPpm) return AlertSeverity.LOW;
 
-        if (gasPpm >= 1000) return AlertSeverity.CRITICAL;
-        if (gasPpm >= 600) return AlertSeverity.HIGH;
-        if (gasPpm >= 400) return AlertSeverity.MEDIUM;
+        if (gasPpm >= 500) return AlertSeverity.CRITICAL;
+        if (gasPpm >= 300) return AlertSeverity.HIGH;
+        if (gasPpm >= 150) return AlertSeverity.MEDIUM;
         return AlertSeverity.LOW;
+    }
+
+    /**
+     * Obtiene el texto descriptivo de la severidad con icono visual
+     */
+    private getSeverityText(severity: AlertSeverity): string {
+        switch (severity) {
+            case AlertSeverity.CRITICAL:
+                return '🔴 Nivel Crítico';
+            case AlertSeverity.HIGH:
+                return '🟠 Nivel Alto';
+            case AlertSeverity.MEDIUM:
+                return '🟡 Nivel Medio';
+            case AlertSeverity.LOW:
+            default:
+                return '🟢 Nivel Bajo';
+        }
     }
 
     /**

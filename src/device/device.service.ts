@@ -23,6 +23,8 @@ export class DeviceService {
     deviceKey: true,
     userId: true,
     createdAt: true,
+    status: true,
+    lastSeen: true,
   }
 
   private buildResponse<T>(success: boolean, message: string, data: T, statusCode: number): ApiResponse<T> {
@@ -67,11 +69,28 @@ export class DeviceService {
     }
   }
 
-  async findAll(): Promise<ApiResponse<any>> {
+  async findAll(userId: number): Promise<ApiResponse<any>> {
     try {
-      const devices = await this.prismaService.device.findMany(
-        { select: this.deviceDataSelect }
-      );
+      const devices = await this.prismaService.device.findMany({
+        where: { userId },
+        select: {
+          ...this.deviceDataSelect,
+          sensorData: {
+            take: 1,
+            orderBy: { createdAt: 'desc' },
+            select: {
+              gasConcentrationPpm: true,
+              voltage: true,
+              temperature: true,
+              humidity: true,
+              createdAt: true
+            }
+          }
+        },
+        orderBy: {
+          lastSeen: 'desc'
+        }
+      });
 
       return this.buildResponse(true, 'Dispositivos obtenidos exitosamente', devices, 200);
     } catch (error) {
