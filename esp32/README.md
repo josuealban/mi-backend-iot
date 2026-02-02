@@ -95,10 +95,9 @@ Antes de subir el código al ESP32, actualiza estas constantes en el archivo `.i
 const char* WIFI_SSID = "TU_WIFI_SSID";          // Nombre de tu red WiFi
 const char* WIFI_PASSWORD = "TU_WIFI_PASSWORD";  // Contraseña de tu WiFi
 
-// Configuración Servidor
-const char* SERVER_HOST = "192.168.X.X";         // IP de tu servidor backend
-const int SERVER_PORT = 3000;                     // Puerto del servidor
-const char* DEVICE_KEY = "TU_DEVICE_KEY";        // Device key de tu dispositivo
+// Configuración Servidor (Railway)
+const char* BASE_URL = "https://sistemaiotmq2piensa-production.up.railway.app";
+const char* DEVICE_KEY = "TU_DEVICE_KEY";        // Device key única
 ```
 
 ## Subir el Código
