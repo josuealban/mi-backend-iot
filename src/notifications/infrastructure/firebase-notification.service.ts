@@ -13,47 +13,84 @@ export class FirebaseNotificationService implements OnModuleInit {
     }
 
     private initializeFirebase() {
-        const firebaseCredentialsPath = this.configService.get<string>(
-            'FIREBASE_CREDENTIALS_PATH',
-        );
-
-        if (!firebaseCredentialsPath) {
-            this.logger.warn(
-                'FIREBASE_CREDENTIALS_PATH not defined in .env. Firebase integration disabled.',
-            );
+        // Prevenir inicialización múltiple
+        if (admin.apps.length > 0) {
+            this.logger.log('Firebase Admin already initialized');
             return;
         }
 
-        if (admin.apps.length === 0) {
+        // OPCIÓN 1: Usar credenciales en Base64 (RECOMENDADO PARA RAILWAY/PRODUCCIÓN)
+        const firebaseBase64 = this.configService.get<string>('FIREBASE_CREDENTIALS_BASE64');
+
+        if (firebaseBase64) {
             try {
-                // eslint-disable-next-line @typescript-eslint/no-var-requires
-                const path = require('path');
-                const absolutePath = path.resolve(
-                    process.cwd(),
-                    firebaseCredentialsPath,
+                this.logger.log('Attempting to initialize Firebase from Base64 credentials...');
+
+                const serviceAccount = JSON.parse(
+                    Buffer.from(firebaseBase64, 'base64').toString('utf-8')
                 );
-                // eslint-disable-next-line @typescript-eslint/no-var-requires
+
+                admin.initializeApp({
+                    credential: admin.credential.cert(serviceAccount),
+                });
+
+                this.logger.log('✅ Firebase Admin initialized successfully from Base64 credentials');
+                return;
+            } catch (error) {
+                this.logger.error('❌ Failed to initialize Firebase from Base64:', error.message);
+                this.logger.debug('Base64 decode error details:', error);
+            }
+        }
+
+        // OPCIÓN 2: Usar archivo JSON (DESARROLLO LOCAL)
+        const firebaseCredentialsPath = this.configService.get<string>('FIREBASE_CREDENTIALS_PATH');
+
+        if (firebaseCredentialsPath) {
+            try {
+                this.logger.log(`Attempting to initialize Firebase from file: ${firebaseCredentialsPath}`);
+
+                const path = require('path');
+                const absolutePath = path.resolve(process.cwd(), firebaseCredentialsPath);
                 const serviceAccount = require(absolutePath);
 
                 admin.initializeApp({
                     credential: admin.credential.cert(serviceAccount),
                 });
-                this.logger.log('Firebase Admin initialized successfully');
+
+                this.logger.log('✅ Firebase Admin initialized successfully from file');
+                return;
             } catch (error) {
-                this.logger.error('Failed to initialize Firebase Admin', error);
+                this.logger.error('❌ Failed to initialize Firebase from file:', error.message);
+                this.logger.debug('File load error details:', error);
             }
         }
+
+        this.logger.warn(
+            '⚠️ Firebase credentials not configured. Push notifications will be disabled.\n' +
+            'Please set either:\n' +
+            '  - FIREBASE_CREDENTIALS_BASE64 (for production/Railway)\n' +
+            '  - FIREBASE_CREDENTIALS_PATH (for local development)'
+        );
     }
 
+    /**
+     * Envía una notificación push a un dispositivo específico
+     */
     async sendPushNotification(
         token: string,
         title: string,
         body: string,
         data?: Record<string, string>,
-    ) {
+    ): Promise<string | null> {
+        // Verificar si Firebase está inicializado
+        if (admin.apps.length === 0) {
+            this.logger.warn('Firebase not initialized. Skipping notification.');
+            return null;
+        }
+
         if (!token) {
             this.logger.warn('No token provided for notification');
-            return;
+            return null;
         }
 
         try {
@@ -63,14 +100,113 @@ export class FirebaseNotificationService implements OnModuleInit {
                     title,
                     body,
                 },
-                data: data,
+                data: data || {},
+                android: {
+                    priority: 'high',
+                    notification: {
+                        sound: 'default',
+                        priority: 'high',
+                    },
+                },
+                apns: {
+                    payload: {
+                        aps: {
+                            sound: 'default',
+                            badge: 1,
+                        },
+                    },
+                },
             };
 
             const response = await admin.messaging().send(message);
+            this.logger.log(`✅ Notification sent successfully: ${response}`);
             return response;
         } catch (error) {
-            this.logger.error(`Error sending notification to ${token}`, error);
+            this.logger.error(
+                `❌ Error sending notification to token: ${token.substring(0, 20)}...`,
+                error.message
+            );
+
+            // Detalles específicos de errores comunes
+            if (error.code === 'messaging/invalid-registration-token' ||
+                error.code === 'messaging/registration-token-not-registered') {
+                this.logger.warn('Token is invalid or expired. User may need to re-register.');
+            }
+
             return null;
         }
+    }
+
+    /**
+     * Envía notificaciones a múltiples dispositivos
+     */
+    async sendMulticastNotification(
+        tokens: string[],
+        title: string,
+        body: string,
+        data?: Record<string, string>,
+    ): Promise<admin.messaging.BatchResponse | null> {
+        if (admin.apps.length === 0) {
+            this.logger.warn('Firebase not initialized. Skipping multicast notification.');
+            return null;
+        }
+
+        if (!tokens || tokens.length === 0) {
+            this.logger.warn('No tokens provided for multicast notification');
+            return null;
+        }
+
+        try {
+            const message: admin.messaging.MulticastMessage = {
+                tokens: tokens,
+                notification: {
+                    title,
+                    body,
+                },
+                data: data || {},
+            };
+
+            const response = await admin.messaging().sendEachForMulticast(message);
+
+            this.logger.log(
+                `✅ Multicast sent: ${response.successCount} success, ${response.failureCount} failed`
+            );
+
+            if (response.failureCount > 0) {
+                response.responses.forEach((resp, idx) => {
+                    if (!resp.success) {
+                        this.logger.warn(`Failed to send to token ${idx}: ${resp.error}`);
+                    }
+                });
+            }
+
+            return response;
+        } catch (error) {
+            this.logger.error('❌ Error sending multicast notification:', error.message);
+            return null;
+        }
+    }
+
+    /**
+     * Verifica si Firebase está correctamente inicializado
+     */
+    isInitialized(): boolean {
+        return admin.apps.length > 0;
+    }
+
+    /**
+     * Obtiene estadísticas de Firebase
+     */
+    getStats() {
+        return {
+            initialized: this.isInitialized(),
+            appsCount: admin.apps.length,
+            environment: this.configService.get<string>('NODE_ENV'),
+            credentialSource: this.configService.get<string>('FIREBASE_CREDENTIALS_BASE64')
+                ? 'Base64'
+                : this.configService.get<string>('FIREBASE_CREDENTIALS_PATH')
+                    ? 'File'
+                    : 'None',
+        };
     }
 }
