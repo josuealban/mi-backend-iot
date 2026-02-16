@@ -46,6 +46,13 @@ export class PrismaNotificationRepository implements NotificationRepository {
     async findAll(userId: number): Promise<any[]> {
         return this.prisma.notification.findMany({
             where: { userId },
+            include: {
+                alert: {
+                    include: {
+                        device: true
+                    }
+                }
+            },
             orderBy: { createdAt: 'desc' },
         });
     }

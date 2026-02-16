@@ -133,7 +133,6 @@ export class UsersService {
         }
       });
 
-      this.logger.log(`Usuario ${id} actualizado exitosamente`);
       return this.buildResponse(true, 'Usuario actualizado exitosamente', updatedUser, 200);
 
     } catch (error) {
@@ -194,7 +193,6 @@ export class UsersService {
         }
       });
 
-      this.logger.log(`Contraseña actualizada para usuario ${id}`);
       return this.buildResponse(true, 'Contraseña actualizada exitosamente', null, 200);
 
     } catch (error) {

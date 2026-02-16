@@ -15,7 +15,6 @@ export class FirebaseNotificationService implements OnModuleInit {
     private initializeFirebase() {
         // Prevenir inicialización múltiple
         if (admin.apps.length > 0) {
-            this.logger.log('Firebase Admin already initialized');
             return;
         }
 
@@ -24,7 +23,6 @@ export class FirebaseNotificationService implements OnModuleInit {
 
         if (firebaseBase64) {
             try {
-                this.logger.log('Attempting to initialize Firebase from Base64 credentials...');
 
                 const serviceAccount = JSON.parse(
                     Buffer.from(firebaseBase64, 'base64').toString('utf-8')
@@ -34,7 +32,6 @@ export class FirebaseNotificationService implements OnModuleInit {
                     credential: admin.credential.cert(serviceAccount),
                 });
 
-                this.logger.log('✅ Firebase Admin initialized successfully from Base64 credentials');
                 return;
             } catch (error) {
                 this.logger.error('❌ Failed to initialize Firebase from Base64:', error.message);
@@ -47,7 +44,6 @@ export class FirebaseNotificationService implements OnModuleInit {
 
         if (firebaseCredentialsPath) {
             try {
-                this.logger.log(`Attempting to initialize Firebase from file: ${firebaseCredentialsPath}`);
 
                 const path = require('path');
                 const absolutePath = path.resolve(process.cwd(), firebaseCredentialsPath);
@@ -57,7 +53,6 @@ export class FirebaseNotificationService implements OnModuleInit {
                     credential: admin.credential.cert(serviceAccount),
                 });
 
-                this.logger.log('✅ Firebase Admin initialized successfully from file');
                 return;
             } catch (error) {
                 this.logger.error('❌ Failed to initialize Firebase from file:', error.message);
@@ -106,6 +101,7 @@ export class FirebaseNotificationService implements OnModuleInit {
                     notification: {
                         sound: 'default',
                         priority: 'high',
+                        color: data?.color || '#3b82f6',
                     },
                 },
                 apns: {
@@ -119,7 +115,6 @@ export class FirebaseNotificationService implements OnModuleInit {
             };
 
             const response = await admin.messaging().send(message);
-            this.logger.log(`✅ Notification sent successfully: ${response}`);
             return response;
         } catch (error) {
             this.logger.error(
@@ -168,9 +163,6 @@ export class FirebaseNotificationService implements OnModuleInit {
 
             const response = await admin.messaging().sendEachForMulticast(message);
 
-            this.logger.log(
-                `✅ Multicast sent: ${response.successCount} success, ${response.failureCount} failed`
-            );
 
             if (response.failureCount > 0) {
                 response.responses.forEach((resp, idx) => {
