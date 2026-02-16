@@ -37,10 +37,11 @@ model Device {
   createdAt      DateTime        @default(now()) @map("created_at")
   updatedAt      DateTime        @updatedAt @map("updated_at")
   isActive       Boolean         @default(true) @map("is_active")
+  windowStatus   Boolean         @default(false) @map("window_status")
+  fanStatus      Boolean         @default(false) @map("fan_status")
   alerts         Alert[]
   deviceSettings DeviceSettings?
   user           User            @relation(fields: [userId], references: [id], onDelete: Cascade)
-  sensorData     SensorData[]
 
   @@index([userId], map: "idx_devices_user")
   @@index([deviceKey], map: "idx_devices_key")
@@ -48,38 +49,27 @@ model Device {
   @@map("devices")
 }
 
-model SensorData {
-  id                  Int      @id @default(autoincrement())
-  deviceId            Int      @map("device_id")
-  rawValue            Int      @map("raw_value")
-  voltage             Float?
-  gasConcentrationPpm Float?   @map("gas_concentration_ppm")
-  rsRoRatio           Float?   @map("rs_ro_ratio")
-  temperature         Float?
-  humidity            Float?
-  thresholdPassed     Boolean  @default(false) @map("threshold_passed")
-  readAt              DateTime @default(now()) @map("read_at")
-  createdAt           DateTime @default(now()) @map("created_at")
-  device              Device   @relation(fields: [deviceId], references: [id], onDelete: Cascade)
-
-  @@index([deviceId], map: "idx_sensor_device")
-  @@index([createdAt], map: "idx_sensor_created")
-  @@index([deviceId, createdAt], map: "idx_sensor_device_time")
-  @@index([thresholdPassed], map: "idx_sensor_threshold")
-  @@map("sensor_data")
-}
-
 model DeviceSettings {
-  id                   Int      @id @default(autoincrement())
-  deviceId             Int      @unique @map("device_id")
-  gasThresholdPpm      Float    @default(300.0) @map("gas_threshold_ppm")
-  voltageThreshold     Float    @default(1.5) @map("voltage_threshold")
+  id       Int @id @default(autoincrement())
+  deviceId Int @unique @map("device_id")
+
+  // Umbrales específicos por sensor
+  mq2ThresholdPpm Float @default(300.0) @map("mq2_threshold_ppm")
+  mq3ThresholdPpm Float @default(150.0) @map("mq3_threshold_ppm")
+  mq5ThresholdPpm Float @default(200.0) @map("mq5_threshold_ppm")
+  mq9ThresholdPpm Float @default(100.0) @map("mq9_threshold_ppm")
+
+  // Valores R0 específicos (Calibración)
+  mq2R0 Float @default(5.5) @map("mq2_r0")
+  mq3R0 Float @default(2.0) @map("mq3_r0")
+  mq5R0 Float @default(20.0) @map("mq5_r0")
+  mq9R0 Float @default(12.0) @map("mq9_r0")
+
   buzzerEnabled        Boolean  @default(true) @map("buzzer_enabled")
   ledEnabled           Boolean  @default(true) @map("led_enabled")
   notifyUser           Boolean  @default(true) @map("notify_user")
   notificationCooldown Int      @default(300) @map("notification_cooldown")
   autoShutoff          Boolean  @default(false) @map("auto_shutoff")
-  calibrationR0        Float    @default(10.0) @map("calibration_r0")
   updatedAt            DateTime @updatedAt @map("updated_at")
   device               Device   @relation(fields: [deviceId], references: [id], onDelete: Cascade)
 
@@ -92,6 +82,7 @@ model Alert {
   deviceId      Int            @map("device_id")
   alertType     AlertType      @map("alert_type")
   severity      AlertSeverity  @default(MEDIUM)
+  gasType       GasType?       @map("gas_type")
   message       String         @db.VarChar(255)
   gasValuePpm   Float?         @map("gas_value_ppm")
   voltageValue  Float?         @map("voltage_value")
@@ -147,6 +138,15 @@ enum AlertSeverity {
   MEDIUM
   HIGH
   CRITICAL
+}
+
+enum GasType {
+  LPG // MQ2 - Gas licuado de petróleo / Propano
+  METHANE // MQ5 - Metano / Gas natural
+  ALCOHOL // MQ3 - Alcohol / Etanol
+  CO // MQ9 - Monóxido de carbono
+  SMOKE // MQ2 - Humo
+  UNKNOWN
 }
 
 enum NotificationType {
