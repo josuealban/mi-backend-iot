@@ -1,142 +1,94 @@
-import { Controller, Post, Get, Body, Param, HttpCode, Logger, Patch } from '@nestjs/common';
+import { Controller, Post, Get, Body, Param, HttpCode, Logger, Patch, UseGuards, ParseIntPipe } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
 import { SensorDataService } from './sensor-data.service';
-import { SensorReadingDto } from './dto/sensor-reading.dto';
+import { GasAlertDto } from './dto/sensor-reading.dto';
 import { PrismaService } from '../prisma/prisma.service';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { GetUser } from '../auth/decorators/get-user.decorator';
 
 @ApiTags('sensor-data')
 @Controller('sensor-data')
 export class SensorDataController {
     private readonly logger = new Logger(SensorDataController.name);
-    private pendingCommands = new Map<string, any>();
 
     constructor(
         private sensorDataService: SensorDataService,
         private prisma: PrismaService,
     ) { }
 
-    @Post()
+    /**
+     * ESP32 envía alerta de gas detectado (solo cuando se detecta gas)
+     * Los datos en tiempo real van por WebSocket, no por este endpoint
+     */
+    @Post('alert')
     @HttpCode(200)
-    @ApiOperation({ summary: 'Recibir datos del sensor desde ESP32' })
-    @ApiResponse({ status: 200, description: 'Datos procesados correctamente' })
-    async receiveSensorData(@Body() data: SensorReadingDto) {
-        this.logger.log(`📊 Datos recibidos de dispositivo: ${data.deviceKey}`);
-        this.logger.log(`   Gas: ${data.gasConcentrationPpm} PPM`);
-        this.logger.log(`   Voltage: ${data.voltage} V`);
+    @ApiOperation({ summary: 'Recibir alerta de gas desde ESP32 (solo cuando detecta)' })
+    @ApiResponse({ status: 200, description: 'Alerta procesada correctamente' })
+    async receiveGasAlert(@Body() data: GasAlertDto) {
+        this.logger.warn(
+            `🚨 ALERTA DE GAS recibida: ${data.gasType} - ` +
+            `${data.gasConcentrationPpm} PPM - Sensor: ${data.sensorSource} - ` +
+            `Device: ${data.deviceKey}`
+        );
 
-        const result = await this.sensorDataService.processSensorReading(data);
-
-        // Si hay alerta, preparar comando para el ESP32
-        if (result.thresholdPassed) {
-            this.pendingCommands.set(data.deviceKey, {
-                ledState: result.shouldActivateLed,
-                buzzerState: result.shouldActivateBuzzer,
-                message: 'Gas threshold exceeded!',
-                timestamp: new Date().toISOString(),
-            });
-        }
+        const result = await this.sensorDataService.processGasAlert(data);
 
         return {
             success: true,
-            message: 'Data received successfully',
-            thresholdPassed: result.thresholdPassed,
-            command: this.pendingCommands.get(data.deviceKey) || null,
+            message: 'Gas alert processed',
+            severity: result.severity,
+            gasType: result.gasType,
+            shouldActivateBuzzer: result.shouldActivateBuzzer,
+            shouldActivateLed: result.shouldActivateLed,
         };
     }
 
-    @Post('save-calibration/:deviceKey')
+    @Patch('config/:deviceKey')
     @HttpCode(200)
-    @ApiOperation({ summary: 'Guardar calibración R0 del sensor desde ESP32' })
-    @ApiResponse({ status: 200, description: 'Calibración guardada exitosamente' })
-    async saveCalibration(
+    @ApiOperation({ summary: 'Actualizar configuración/calibración desde ESP32' })
+    async updateConfig(
         @Param('deviceKey') deviceKey: string,
-        @Body() calibrationData: { calibrationR0: number }
+        @Body() data: any
     ) {
         try {
-            this.logger.log(`🔧 Guardando calibración para dispositivo: ${deviceKey}`);
-            this.logger.log(`   R0: ${calibrationData.calibrationR0} kΩ`);
 
-            // Buscar el dispositivo
             const device = await this.prisma.device.findUnique({
                 where: { deviceKey },
                 include: { deviceSettings: true },
             });
 
-            if (!device) {
-                this.logger.error(`❌ Dispositivo no encontrado: ${deviceKey}`);
-                return {
-                    success: false,
-                    message: 'Device not found',
-                };
-            }
+            if (!device) throw new Error('Device not found');
 
-            // Actualizar o crear configuración
+            const settingsData: any = {};
+            if (data.mq2R0 !== undefined) settingsData.mq2R0 = data.mq2R0;
+            if (data.mq3R0 !== undefined) settingsData.mq3R0 = data.mq3R0;
+            if (data.mq5R0 !== undefined) settingsData.mq5R0 = data.mq5R0;
+            if (data.mq9R0 !== undefined) settingsData.mq9R0 = data.mq9R0;
+
+            if (data.mq2Threshold !== undefined) settingsData.mq2ThresholdPpm = data.mq2Threshold;
+            if (data.mq3Threshold !== undefined) settingsData.mq3ThresholdPpm = data.mq3Threshold;
+            if (data.mq5Threshold !== undefined) settingsData.mq5ThresholdPpm = data.mq5Threshold;
+            if (data.mq9Threshold !== undefined) settingsData.mq9ThresholdPpm = data.mq9Threshold;
+
             if (device.deviceSettings) {
-                // Actualizar configuración existente
-                const updated = await this.prisma.deviceSettings.update({
+                await this.prisma.deviceSettings.update({
                     where: { deviceId: device.id },
-                    data: {
-                        calibrationR0: calibrationData.calibrationR0,
-                    },
+                    data: settingsData,
                 });
-                this.logger.log(`✅ Calibración actualizada para dispositivo ${device.name}`);
-                this.logger.log(`   Valor anterior → nuevo: ${device.deviceSettings.calibrationR0} → ${updated.calibrationR0}`);
             } else {
-                // Crear nueva configuración con valores por defecto
                 await this.prisma.deviceSettings.create({
                     data: {
                         deviceId: device.id,
-                        calibrationR0: calibrationData.calibrationR0,
-                        gasThresholdPpm: 300.0,      // Valor por defecto
-                        voltageThreshold: 1.5,        // Valor por defecto
-                        buzzerEnabled: true,
-                        ledEnabled: true,
-                        notifyUser: true,
-                        notificationCooldown: 300,
-                        autoShutoff: false,
+                        ...settingsData
                     },
                 });
-                this.logger.log(`✅ Configuración creada con calibración para dispositivo ${device.name}`);
             }
 
-            return {
-                success: true,
-                message: 'Calibration saved successfully',
-                data: {
-                    deviceKey,
-                    deviceName: device.name,
-                    calibrationR0: calibrationData.calibrationR0,
-                },
-            };
+            return { success: true, message: 'Config updated' };
         } catch (error) {
-            this.logger.error(`❌ Error guardando calibración: ${error.message}`, error.stack);
-            return {
-                success: false,
-                message: 'Error saving calibration',
-                error: error.message,
-            };
+            this.logger.error(`❌ Error actualizando config: ${error.message}`);
+            return { success: false, message: error.message };
         }
-    }
-
-    @Get('command/:deviceKey')
-    @ApiOperation({ summary: 'ESP32 obtiene comandos pendientes (polling)' })
-    @ApiResponse({ status: 200, description: 'Comando obtenido' })
-    async getCommand(@Param('deviceKey') deviceKey: string) {
-        const command = this.pendingCommands.get(deviceKey);
-
-        if (command) {
-            this.pendingCommands.delete(deviceKey);
-            this.logger.log(`📤 Comando enviado a ${deviceKey}`);
-            return command;
-        }
-
-        // Actualizar lastSeen
-        await this.prisma.device.update({
-            where: { deviceKey },
-            data: { lastSeen: new Date(), status: 'ONLINE' },
-        }).catch(() => { });
-
-        return { ledState: false, buzzerState: false };
     }
 
     @Get('config/:deviceKey')
@@ -149,46 +101,64 @@ export class SensorDataController {
                 include: { deviceSettings: true },
             });
 
-            if (!device) {
-                this.logger.warn(`⚠️ Dispositivo no encontrado: ${deviceKey}, usando valores por defecto`);
+            if (!device || !device.deviceSettings) {
                 return {
-                    gasThreshold: 300.0,
-                    voltageThreshold: 1.5,
+                    mq2Threshold: 300.0, mq3Threshold: 150.0, mq5Threshold: 200.0, mq9Threshold: 100.0,
+                    mq2R0: 5.5, mq3R0: 2.0, mq5R0: 20.0, mq9R0: 12.0,
                     buzzerEnabled: true,
-                    ledEnabled: true,
-                    calibrationR0: 10.0,
+                    ledEnabled: true
                 };
             }
 
-            if (!device.deviceSettings) {
-                this.logger.warn(`⚠️ Sin configuración para dispositivo ${device.name}, usando valores por defecto`);
-                return {
-                    gasThreshold: 300.0,
-                    voltageThreshold: 1.5,
-                    buzzerEnabled: true,
-                    ledEnabled: true,
-                    calibrationR0: 10.0,
-                };
-            }
-
-            this.logger.log(`📋 Configuración enviada a ${device.name}: R0=${device.deviceSettings.calibrationR0} kΩ`);
+            const s = device.deviceSettings;
 
             return {
-                gasThreshold: device.deviceSettings.gasThresholdPpm,
-                voltageThreshold: device.deviceSettings.voltageThreshold,
-                buzzerEnabled: device.deviceSettings.buzzerEnabled,
-                ledEnabled: device.deviceSettings.ledEnabled,
-                calibrationR0: device.deviceSettings.calibrationR0,
+                mq2Threshold: s.mq2ThresholdPpm,
+                mq3Threshold: s.mq3ThresholdPpm,
+                mq5Threshold: s.mq5ThresholdPpm,
+                mq9Threshold: s.mq9ThresholdPpm,
+                mq2R0: s.mq2R0,
+                mq3R0: s.mq3R0,
+                mq5R0: s.mq5R0,
+                mq9R0: s.mq9R0,
+                buzzerEnabled: s.buzzerEnabled,
+                ledEnabled: s.ledEnabled,
             };
         } catch (error) {
             this.logger.error(`❌ Error obteniendo configuración: ${error.message}`);
             return {
-                gasThreshold: 300.0,
-                voltageThreshold: 1.5,
+                mq2Threshold: 300.0, mq3Threshold: 150.0, mq5Threshold: 200.0, mq9Threshold: 100.0,
+                mq2R0: 5.5, mq3R0: 2.0, mq5R0: 20.0, mq9R0: 12.0,
                 buzzerEnabled: true,
-                ledEnabled: true,
-                calibrationR0: 10.0,
+                ledEnabled: true
             };
         }
+    }
+
+    @Patch('alerts/:id/resolve')
+    @UseGuards(JwtAuthGuard)
+    @ApiOperation({ summary: 'Resolver una alerta activa' })
+    @ApiResponse({ status: 200, description: 'Alerta resuelta' })
+    async resolveAlert(
+        @Param('id', ParseIntPipe) alertId: number,
+        @GetUser('id') userId: number
+    ) {
+        const result = await this.sensorDataService.resolveAlert(alertId, userId);
+        return {
+            success: true,
+            data: result,
+        };
+    }
+    @Post('actuator')
+    @HttpCode(200)
+    @ApiOperation({ summary: 'Control manual de actuadores (ventana/ventilador)' })
+    async manualControl(@Body() data: { deviceKey: string, actuator: 'window' | 'fan', status: boolean }) {
+
+        await this.sensorDataService.handleManualControl(data.deviceKey, data.actuator, data.status);
+
+        return {
+            success: true,
+            message: `Comando ${data.actuator} ${data.status ? 'activado' : 'desactivado'} enviado.`
+        };
     }
 }

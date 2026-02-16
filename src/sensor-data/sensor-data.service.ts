@@ -1,8 +1,9 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { SensorReadingDto } from './dto/sensor-reading.dto';
-import { AlertType, AlertSeverity, NotificationType } from '@prisma/client';
+import { GasAlertDto } from './dto/sensor-reading.dto';
+import { AlertType, AlertSeverity, GasType, NotificationType } from '@prisma/client';
 import { SendNotificationUseCase } from '../notifications/application/send-notification.use-case';
+import { SensorGateway } from './sensor.gateway';
 
 @Injectable()
 export class SensorDataService {
@@ -10,13 +11,15 @@ export class SensorDataService {
 
     constructor(
         private prisma: PrismaService,
-        private sendNotificationUseCase: SendNotificationUseCase
+        private sendNotificationUseCase: SendNotificationUseCase,
+        private sensorGateway: SensorGateway
     ) { }
 
     /**
-     * Procesa y almacena una lectura del sensor
+     * Procesa una alerta de gas detectado por un sensor MQ
+     * No guarda datos en la DB, solo crea la alerta y notificación
      */
-    async processSensorReading(data: SensorReadingDto) {
+    async processGasAlert(data: GasAlertDto) {
         try {
             // 1. Verificar que el dispositivo existe
             const device = await this.prisma.device.findUnique({
@@ -40,89 +43,46 @@ export class SensorDataService {
                 },
             });
 
-            // 3. Verificar si se superó el umbral
+            // 3. Determinar severidad y tipo de gas
             const settings = device.deviceSettings;
-            const thresholdPassed = this.checkThreshold(data, settings);
+            const severity = this.determineSeverity(data.gasConcentrationPpm, settings, data.sensorSource);
+            const gasType = this.mapGasType(data.gasType);
+            const gasTypeLabel = this.getGasTypeLabel(gasType);
 
-            // 4. Guardar la lectura del sensor
-            const sensorData = await this.prisma.sensorData.create({
-                data: {
-                    deviceId: device.id,
-                    rawValue: data.rawValue,
-                    voltage: data.voltage,
-                    gasConcentrationPpm: data.gasConcentrationPpm,
-                    rsRoRatio: data.rsRoRatio,
-                    temperature: data.temperature,
-                    humidity: data.humidity,
-                    thresholdPassed,
-                },
-            });
-
-            // 5. Si se superó el umbral, crear alerta y notificación
-            if (thresholdPassed && settings?.notifyUser) {
-                await this.createAlertAndNotification(device, data);
+            // 4. Crear alerta y notificación
+            if (settings?.notifyUser !== false) {
+                await this.createAlertAndNotification(device, data, severity, gasType);
             }
 
-            this.logger.log(
-                `Sensor data saved for device ${device.name} (ID: ${device.id}): ` +
-                `Raw=${data.rawValue}, Gas=${data.gasConcentrationPpm?.toFixed(2)} PPM, ` +
-                `Threshold=${thresholdPassed ? 'EXCEEDED' : 'OK'}`
-            );
 
             return {
                 success: true,
-                data: sensorData,
-                thresholdPassed,
-                shouldActivateBuzzer: thresholdPassed && settings?.buzzerEnabled,
-                shouldActivateLed: thresholdPassed && settings?.ledEnabled,
+                severity,
+                gasType,
+                shouldActivateBuzzer: settings?.buzzerEnabled ?? true,
+                shouldActivateLed: settings?.ledEnabled ?? true,
             };
         } catch (error) {
-            this.logger.error(`Error processing sensor reading: ${error.message}`, error.stack);
+            this.logger.error(`Error processing gas alert: ${error.message}`, error.stack);
             throw error;
         }
     }
 
     /**
-     * Verifica si se superó el umbral configurado
+     * Crea una alerta y notificación cuando se detecta gas
      */
-    private checkThreshold(data: SensorReadingDto, settings: any): boolean {
-        if (!settings) return false;
-
-        const gasThresholdExceeded =
-            data.gasConcentrationPpm &&
-            data.gasConcentrationPpm > settings.gasThresholdPpm;
-
-        const voltageThresholdExceeded =
-            data.voltage &&
-            data.voltage > settings.voltageThreshold;
-
-        return !!(gasThresholdExceeded || voltageThresholdExceeded);
-    }
-
-    /**
-     * Crea una alerta y notificación cuando se supera el umbral
-     */
-    private async createAlertAndNotification(device: any, data: SensorReadingDto) {
+    private async createAlertAndNotification(
+        device: any,
+        data: GasAlertDto,
+        severity: AlertSeverity,
+        gasType: GasType
+    ) {
         try {
-            // Verificar si ya existe una alerta activa reciente (últimos 5 minutos)
-            const recentAlert = await this.prisma.alert.findFirst({
-                where: {
-                    deviceId: device.id,
-                    resolved: false,
-                    createdAt: {
-                        gte: new Date(Date.now() - 1 * 60 * 1000), // 1 minutos
-                    },
-                },
-            });
+            // Cooldown de alertas eliminado para pruebas en tiempo real
 
-            // Si ya existe una alerta reciente, no crear otra (cooldown)
-            if (recentAlert) {
-                this.logger.debug(`Alert cooldown active for device ${device.id}`);
-                return;
-            }
 
-            // Determinar severidad basada en el nivel de gas
-            const severity = this.determineSeverity(data.gasConcentrationPpm);
+            const gasTypeLabel = this.getGasTypeLabel(gasType);
+            const severityText = this.getSeverityText(severity);
 
             // Crear la alerta
             const alert = await this.prisma.alert.create({
@@ -130,7 +90,8 @@ export class SensorDataService {
                     deviceId: device.id,
                     alertType: AlertType.GAS_DETECTED,
                     severity,
-                    message: `Gas detected: ${data.gasConcentrationPpm?.toFixed(2)} PPM`,
+                    gasType,
+                    message: `${gasTypeLabel} detectado: ${data.gasConcentrationPpm?.toFixed(2)} PPM (Sensor: ${data.sensorSource})`,
                     gasValuePpm: data.gasConcentrationPpm,
                     voltageValue: data.voltage,
                     resolved: false,
@@ -138,141 +99,173 @@ export class SensorDataService {
             });
 
             // Crear notificación para el usuario
-            const severityText = this.getSeverityText(severity);
             const notification = await this.prisma.notification.create({
                 data: {
                     userId: device.userId,
                     alertId: alert.id,
-                    title: `Alerta de Gas - ${severityText} - ${device.name}`,
-                    message: `Gas: ${data.gasConcentrationPpm?.toFixed(2)} PPM` +
-                        (data.temperature ? ` | Temp: ${data.temperature.toFixed(1)}°C` : '') +
-                        (data.humidity ? ` | Hum: ${data.humidity.toFixed(1)}%` : ''),
+                    title: `${severityText}: ${gasTypeLabel}`,
+                    message: `${device.name}: ${data.gasConcentrationPpm?.toFixed(1)} PPM (${data.sensorSource})`,
                     type: NotificationType.ALERT,
                     read: false,
                     sent: true,
                 },
             });
 
+            // Mapear color de severidad para Firebase
+            const severityColors: Record<AlertSeverity, string> = {
+                [AlertSeverity.CRITICAL]: '#ef4444', // Red 500
+                [AlertSeverity.HIGH]: '#f97316',     // Orange 500
+                [AlertSeverity.MEDIUM]: '#f59e0b',   // Yellow 500
+                [AlertSeverity.LOW]: '#3b82f6',      // Blue 500
+            };
+
             // Enviar notificación push al dispositivo del usuario
             try {
-                const notificationBody = `Gas: ${data.gasConcentrationPpm?.toFixed(2)} PPM` +
-                    (data.temperature ? ` | Temp: ${data.temperature.toFixed(1)}°C` : '') +
-                    (data.humidity ? ` | Humidity: ${data.humidity.toFixed(1)}%` : '');
+                const notificationBody = `${device.name}: ${data.gasConcentrationPpm?.toFixed(1)} PPM (${data.sensorSource})`;
 
                 await this.sendNotificationUseCase.execute(
                     device.userId,
-                    `Alerta de Gas - ${severityText} - ${device.name}`,
+                    `${severityText}: ${gasTypeLabel}`,
                     notificationBody,
                     {
                         deviceId: device.id.toString(),
                         alertId: alert.id.toString(),
-                        gasLevel: data.gasConcentrationPpm?.toFixed(2) || '0',
+                        gasLevel: data.gasConcentrationPpm?.toFixed(1) || '0',
+                        gasType: gasType,
+                        sensorSource: data.sensorSource,
                         severity: severity,
+                        resolved: 'false',
+                        color: severityColors[severity],
                     }
                 );
-                this.logger.log(`Push notification sent to user ${device.userId} for alert ${alert.id}`);
             } catch (error) {
                 this.logger.error(`Failed to send push notification: ${error.message}`);
-                // No lanzar error, la alerta ya fue creada en BD
             }
 
-            this.logger.warn(
-                `ALERT CREATED: Device ${device.name} - Gas ${data.gasConcentrationPpm?.toFixed(2)} PPM - Severity: ${severity}`
-            );
         } catch (error) {
             this.logger.error(`Error creating alert: ${error.message}`, error.stack);
         }
     }
 
     /**
-     * Determina la severidad de la alerta basada en la concentración de gas
-     * Umbrales basados en estándares de seguridad para gases combustibles:
-     * - BAJO: 50-150 PPM (Detección temprana)
-     * - MEDIO: 150-300 PPM (Precaución)
-     * - ALTO: 300-500 PPM (Peligro)
-     * - CRÍTICO: >500 PPM (Evacuación inmediata)
+     * Mapea el string de gasType del ESP32 al enum GasType
      */
-    private determineSeverity(gasPpm?: number): AlertSeverity {
-        if (!gasPpm) return AlertSeverity.LOW;
+    private mapGasType(gasType: string): GasType {
+        const mapping: Record<string, GasType> = {
+            'LPG': GasType.LPG,
+            'METHANE': GasType.METHANE,
+            'ALCOHOL': GasType.ALCOHOL,
+            'CO': GasType.CO,
+            'SMOKE': GasType.SMOKE,
+        };
+        return mapping[gasType?.toUpperCase()] || GasType.UNKNOWN;
+    }
 
-        if (gasPpm >= 500) return AlertSeverity.CRITICAL;
-        if (gasPpm >= 300) return AlertSeverity.HIGH;
-        if (gasPpm >= 150) return AlertSeverity.MEDIUM;
+    /**
+     * Obtiene etiqueta descriptiva del tipo de gas
+     */
+    private getGasTypeLabel(gasType: GasType): string {
+        switch (gasType) {
+            case GasType.LPG:
+                return 'Gas LPG/Propano';
+            case GasType.METHANE:
+                return 'Metano/Gas Natural';
+            case GasType.ALCOHOL:
+                return 'Alcohol/Etanol';
+            case GasType.CO:
+                return 'Monóxido / Humo (MQ9)';
+            case GasType.SMOKE:
+                return 'Humo / Incendio';
+            default:
+                return 'Gas Desconocido';
+        }
+    }
+
+    /**
+     * Determina la severidad de la alerta basada en la concentración de gas
+     */
+    private determineSeverity(gasPpm: number = 0, settings?: any, sensorSource?: string): AlertSeverity {
+        // Obtener el umbral configurado para este sensor específico
+        let threshold = 300; // Default
+
+        if (settings && sensorSource) {
+            const source = sensorSource.toUpperCase();
+            if (source.includes('MQ2')) threshold = settings.mq2ThresholdPpm || 300;
+            else if (source.includes('MQ3')) threshold = settings.mq3ThresholdPpm || 150;
+            else if (source.includes('MQ5')) threshold = settings.mq5ThresholdPpm || 200;
+            else if (source.includes('MQ9')) threshold = settings.mq9ThresholdPpm || 100;
+        }
+
+        // Determinar severidad relativa al umbral
+        if (gasPpm >= threshold * 2.0) return AlertSeverity.CRITICAL;
+        if (gasPpm >= threshold * 1.5) return AlertSeverity.HIGH;
+        if (gasPpm >= threshold) return AlertSeverity.MEDIUM;
         return AlertSeverity.LOW;
     }
 
     /**
-     * Obtiene el texto descriptivo de la severidad con icono visual
+     * Obtiene el texto descriptivo de la severidad
      */
     private getSeverityText(severity: AlertSeverity): string {
         switch (severity) {
             case AlertSeverity.CRITICAL:
-                return '🔴 Nivel Crítico';
+                return 'Nivel Critico';
             case AlertSeverity.HIGH:
-                return '🟠 Nivel Alto';
+                return 'Nivel Alto';
             case AlertSeverity.MEDIUM:
-                return '🟡 Nivel Medio';
+                return 'Nivel Medio';
             case AlertSeverity.LOW:
             default:
-                return '🟢 Nivel Bajo';
+                return 'Nivel Bajo';
         }
     }
 
     /**
-     * Obtiene las últimas lecturas de un dispositivo
+     * Resuelve una alerta activa
      */
-    async getLatestReadings(deviceId: number, limit: number = 50) {
+    async resolveAlert(alertId: number, userId: number) {
         try {
-            return await this.prisma.sensorData.findMany({
-                where: { deviceId },
-                orderBy: { createdAt: 'desc' },
-                take: limit,
-            });
-        } catch (error) {
-            this.logger.error(`Error fetching latest readings: ${error.message}`);
-            throw error;
-        }
-    }
-
-    /**
-     * Obtiene estadísticas de un dispositivo
-     */
-    async getDeviceStats(deviceId: number, hours: number = 24) {
-        try {
-            const since = new Date(Date.now() - hours * 60 * 60 * 1000);
-
-            const readings = await this.prisma.sensorData.findMany({
-                where: {
-                    deviceId,
-                    createdAt: { gte: since },
-                },
-                orderBy: { createdAt: 'asc' },
+            const alert = await this.prisma.alert.findUnique({
+                where: { id: alertId },
             });
 
-            if (readings.length === 0) {
-                return {
-                    count: 0,
-                    avgGas: 0,
-                    maxGas: 0,
-                    minGas: 0,
-                    thresholdExceeded: 0,
-                };
+            if (!alert) {
+                throw new NotFoundException(`Alerta con ID ${alertId} no encontrada`);
             }
 
-            const gasValues = readings
-                .map(r => r.gasConcentrationPpm)
-                .filter(v => v !== null) as number[];
+            if (alert.resolved) {
+                return alert;
+            }
 
-            return {
-                count: readings.length,
-                avgGas: gasValues.reduce((a, b) => a + b, 0) / gasValues.length,
-                maxGas: Math.max(...gasValues),
-                minGas: Math.min(...gasValues),
-                thresholdExceeded: readings.filter(r => r.thresholdPassed).length,
-            };
+            return await this.prisma.alert.update({
+                where: { id: alertId },
+                data: {
+                    resolved: true,
+                    resolvedAt: new Date(),
+                    resolvedBy: userId,
+                },
+            });
         } catch (error) {
-            this.logger.error(`Error fetching device stats: ${error.message}`);
+            this.logger.error(`Error resolviendo alerta ${alertId}: ${error.message}`);
             throw error;
+        }
+    }
+    /**
+     * Maneja el control manual de actuadores desde la app
+     */
+    async handleManualControl(deviceKey: string, actuator: 'window' | 'fan', status: boolean) {
+        // Enviar el comando al ESP32 vía WebSocket
+        await this.sensorGateway.sendActuatorCommand(deviceKey, actuator, status);
+
+        // Guardar el estado en la DB para persistencia
+        try {
+            const dataToUpdate = actuator === 'window' ? { windowStatus: status } : { fanStatus: status };
+            await this.prisma.device.update({
+                where: { deviceKey },
+                data: dataToUpdate
+            });
+        } catch (error) {
+            this.logger.error(`Error persisting manual control: ${error.message}`);
         }
     }
 }

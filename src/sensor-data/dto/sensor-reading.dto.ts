@@ -1,15 +1,22 @@
-import { IsNotEmpty, IsNumber, IsOptional, IsString, Min, Max } from 'class-validator';
+import { IsNotEmpty, IsNumber, IsOptional, IsString, Min } from 'class-validator';
 
-export class SensorReadingDto {
+export class GasAlertDto {
     @IsNotEmpty()
     @IsString()
     deviceKey: string;
 
     @IsNotEmpty()
+    @IsString()
+    gasType: string; // LPG, METHANE, ALCOHOL, CO, SMOKE
+
+    @IsNotEmpty()
+    @IsString()
+    sensorSource: string; // MQ2, MQ3, MQ5, MQ9
+
+    @IsNotEmpty()
     @IsNumber()
     @Min(0)
-    @Max(4095)
-    rawValue: number;
+    gasConcentrationPpm: number;
 
     @IsOptional()
     @IsNumber()
@@ -17,11 +24,7 @@ export class SensorReadingDto {
 
     @IsOptional()
     @IsNumber()
-    gasConcentrationPpm?: number;
-
-    @IsOptional()
-    @IsNumber()
-    rsRoRatio?: number;
+    rawValue?: number;
 
     @IsOptional()
     @IsNumber()
