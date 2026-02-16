@@ -113,6 +113,27 @@ export class DeviceController {
     return this.deviceService.findOne(+id);
   }
 
+  @Patch(':id')
+  @ApiOperation({
+    summary: 'Actualizar dispositivo',
+    description: 'Actualiza los datos básicos de un dispositivo'
+  })
+  @ApiParam({
+    name: 'id',
+    description: 'ID del dispositivo',
+    example: 1
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Dispositivo actualizado exitosamente'
+  })
+  update(
+    @Param('id') id: string,
+    @Body() updateDeviceDto: UpdateDeviceDto
+  ) {
+    return this.deviceService.update(+id, updateDeviceDto);
+  }
+
   @Patch(':id/deactivate')
   @ApiOperation({
     summary: 'Desactivar dispositivo',
@@ -167,11 +188,19 @@ export class DeviceController {
       example: {
         id: 1,
         deviceId: 1,
-        gasThresholdPpm: 150.0,
-        voltageThreshold: 2.5,
+        mq2ThresholdPpm: 300.0,
+        mq3ThresholdPpm: 150.0,
+        mq5ThresholdPpm: 200.0,
+        mq9ThresholdPpm: 100.0,
+        mq2R0: 5.5,
+        mq3R0: 2.0,
+        mq5R0: 20.0,
+        mq9R0: 12.0,
         buzzerEnabled: true,
         ledEnabled: true,
-        calibrationR0: 10.0
+        notifyUser: true,
+        notificationCooldown: 300,
+        autoShutoff: false
       }
     }
   })

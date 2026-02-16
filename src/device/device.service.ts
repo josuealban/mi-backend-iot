@@ -6,6 +6,7 @@ import {
   ConflictException,
 } from '@nestjs/common';
 import { CreateDeviceDto } from './dto/create-device.dto';
+import { UpdateDeviceDto } from './dto/update-device.dto';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { randomUUID } from 'crypto';
 import { Prisma } from '@prisma/client';
@@ -75,17 +76,6 @@ export class DeviceService {
         where: { userId },
         select: {
           ...this.deviceDataSelect,
-          sensorData: {
-            take: 1,
-            orderBy: { createdAt: 'desc' },
-            select: {
-              gasConcentrationPpm: true,
-              voltage: true,
-              temperature: true,
-              humidity: true,
-              createdAt: true
-            }
-          }
         },
         orderBy: {
           lastSeen: 'desc'
@@ -109,14 +99,9 @@ export class DeviceService {
         where: { id },
         include: {
           deviceSettings: true,
-          sensorData: {
-            orderBy: { createdAt: 'desc' },
-            take: 50, // Últimas 50 lecturas
-          },
           alerts: {
-            where: { resolved: false },
             orderBy: { createdAt: 'desc' },
-            take: 10, // Últimas 10 alertas no resueltas
+            take: 10,
           },
         },
       });
@@ -141,6 +126,31 @@ export class DeviceService {
 
       throw new InternalServerErrorException(
         'Error al obtener el dispositivo. Por favor, intenta de nuevo.'
+      );
+    }
+  }
+
+  async update(id: number, updateDeviceDto: UpdateDeviceDto): Promise<ApiResponse<any>> {
+    try {
+      const device = await this.prismaService.device.update({
+        where: { id },
+        data: updateDeviceDto,
+        select: this.deviceDataSelect
+      });
+
+      return this.buildResponse(true, 'Dispositivo actualizado exitosamente', device, 200);
+
+    } catch (error) {
+      this.logger.error(`Error en update: ${error.message} `, error.stack);
+
+      if (error instanceof Prisma.PrismaClientKnownRequestError) {
+        if (error.code === 'P2025') {
+          throw new NotFoundException(`Dispositivo con ID ${id} no encontrado`);
+        }
+      }
+
+      throw new InternalServerErrorException(
+        'Error al actualizar el dispositivo. Por favor, intenta de nuevo.'
       );
     }
   }
@@ -199,18 +209,22 @@ export class DeviceService {
       const settings = await this.prismaService.deviceSettings.create({
         data: {
           deviceId,
-          gasThresholdPpm: settingsDto.gasThresholdPpm ?? 150.0,
-          voltageThreshold: settingsDto.voltageThreshold ?? 2.5,
+          mq2ThresholdPpm: settingsDto.mq2ThresholdPpm ?? 300.0,
+          mq3ThresholdPpm: settingsDto.mq3ThresholdPpm ?? 150.0,
+          mq5ThresholdPpm: settingsDto.mq5ThresholdPpm ?? 200.0,
+          mq9ThresholdPpm: settingsDto.mq9ThresholdPpm ?? 100.0,
+          mq2R0: settingsDto.mq2R0 ?? 5.5,
+          mq3R0: settingsDto.mq3R0 ?? 2.0,
+          mq5R0: settingsDto.mq5R0 ?? 20.0,
+          mq9R0: settingsDto.mq9R0 ?? 12.0,
           buzzerEnabled: settingsDto.buzzerEnabled ?? true,
           ledEnabled: settingsDto.ledEnabled ?? true,
           notifyUser: settingsDto.notifyUser ?? true,
           notificationCooldown: settingsDto.notificationCooldown ?? 300,
           autoShutoff: settingsDto.autoShutoff ?? false,
-          calibrationR0: settingsDto.calibrationR0 ?? 10.0,
         },
       });
 
-      this.logger.log(`Configuración creada para dispositivo ${deviceId} `);
 
       return this.buildResponse(true, 'Configuración creada exitosamente', settings, 201);
 
@@ -239,18 +253,22 @@ export class DeviceService {
       const settings = await this.prismaService.deviceSettings.update({
         where: { deviceId },
         data: {
-          ...(settingsDto.gasThresholdPpm !== undefined && { gasThresholdPpm: settingsDto.gasThresholdPpm }),
-          ...(settingsDto.voltageThreshold !== undefined && { voltageThreshold: settingsDto.voltageThreshold }),
+          ...(settingsDto.mq2ThresholdPpm !== undefined && { mq2ThresholdPpm: settingsDto.mq2ThresholdPpm }),
+          ...(settingsDto.mq3ThresholdPpm !== undefined && { mq3ThresholdPpm: settingsDto.mq3ThresholdPpm }),
+          ...(settingsDto.mq5ThresholdPpm !== undefined && { mq5ThresholdPpm: settingsDto.mq5ThresholdPpm }),
+          ...(settingsDto.mq9ThresholdPpm !== undefined && { mq9ThresholdPpm: settingsDto.mq9ThresholdPpm }),
+          ...(settingsDto.mq2R0 !== undefined && { mq2R0: settingsDto.mq2R0 }),
+          ...(settingsDto.mq3R0 !== undefined && { mq3R0: settingsDto.mq3R0 }),
+          ...(settingsDto.mq5R0 !== undefined && { mq5R0: settingsDto.mq5R0 }),
+          ...(settingsDto.mq9R0 !== undefined && { mq9R0: settingsDto.mq9R0 }),
           ...(settingsDto.buzzerEnabled !== undefined && { buzzerEnabled: settingsDto.buzzerEnabled }),
           ...(settingsDto.ledEnabled !== undefined && { ledEnabled: settingsDto.ledEnabled }),
           ...(settingsDto.notifyUser !== undefined && { notifyUser: settingsDto.notifyUser }),
           ...(settingsDto.notificationCooldown !== undefined && { notificationCooldown: settingsDto.notificationCooldown }),
           ...(settingsDto.autoShutoff !== undefined && { autoShutoff: settingsDto.autoShutoff }),
-          ...(settingsDto.calibrationR0 !== undefined && { calibrationR0: settingsDto.calibrationR0 }),
         },
       });
 
-      this.logger.log(`Configuración actualizada para dispositivo ${deviceId} `);
       return this.buildResponse(true, 'Configuración actualizada exitosamente', settings, 200);
     } catch (error) {
       if (error instanceof NotFoundException) {
