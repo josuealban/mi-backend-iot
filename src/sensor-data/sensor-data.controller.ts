@@ -149,6 +149,7 @@ export class SensorDataController {
             data: result,
         };
     }
+
     @Post('actuator')
     @HttpCode(200)
     @ApiOperation({ summary: 'Control manual de actuadores (ventana/ventilador)' })
@@ -159,6 +160,17 @@ export class SensorDataController {
         return {
             success: true,
             message: `Comando ${data.actuator} ${data.status ? 'activado' : 'desactivado'} enviado.`
+        };
+    }
+
+    @Post('calibrate')
+    @HttpCode(200)
+    @ApiOperation({ summary: 'Solicitar calibración remota del dispositivo' })
+    async remoteCalibration(@Body() data: { deviceKey: string }) {
+        await this.sensorDataService.remoteCalibration(data.deviceKey);
+        return {
+            success: true,
+            message: 'Comando de calibración enviado al dispositivo.'
         };
     }
 }

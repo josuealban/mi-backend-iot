@@ -129,6 +129,12 @@ export class SensorGateway
         });
     }
 
+    async sendCalibrationCommand(deviceKey: string) {
+        this.server.to(`device:${deviceKey}`).emit('calibrate', {
+            timestamp: new Date().toISOString()
+        });
+    }
+
     /**
      * App se desuscribe de un dispositivo
      */

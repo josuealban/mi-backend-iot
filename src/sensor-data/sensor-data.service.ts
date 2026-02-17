@@ -268,4 +268,11 @@ export class SensorDataService {
             this.logger.error(`Error persisting manual control: ${error.message}`);
         }
     }
+
+    /**
+     * Envía comando de calibración remota al ESP32
+     */
+    async remoteCalibration(deviceKey: string) {
+        await this.sensorGateway.sendCalibrationCommand(deviceKey);
+    }
 }
