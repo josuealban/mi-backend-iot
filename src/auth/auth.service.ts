@@ -169,6 +169,53 @@ export class AuthService {
     }
   }
 
+  async refreshToken(refreshTokenDto: { refreshToken: string }) {
+    try {
+      const { refreshToken } = refreshTokenDto;
+
+      // Verificar el token
+      const payload = this.jwtService.verify(refreshToken);
+
+      // Buscar el usuario
+      const user = await this.prismaService.user.findUnique({
+        where: { id: payload.id },
+        select: {
+          id: true,
+          username: true,
+          email: true,
+          isActive: true
+        }
+      });
+
+      if (!user) {
+        throw new UnauthorizedException('Token de actualización inválido');
+      }
+
+      if (!user.isActive) {
+        throw new UnauthorizedException('Usuario desactivado');
+      }
+
+      // Generar nuevos tokens
+      const newAccessToken = this.getJwtToken(
+        { id: user.id },
+        { expiresIn: '1h' }
+      );
+
+      const newRefreshToken = this.getJwtToken(
+        { id: user.id },
+        { expiresIn: '7d' }
+      );
+
+      return {
+        user,
+        accessToken: newAccessToken,
+        refreshToken: newRefreshToken
+      };
+    } catch (error) {
+      throw new UnauthorizedException('Token de actualización expirado o inválido');
+    }
+  }
+
   private getJwtToken(payload: JwtPayload, options?: JwtSignOptions): string {
     return this.jwtService.sign(payload, options);
   }
