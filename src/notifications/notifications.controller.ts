@@ -1,38 +1,31 @@
-import { Controller, Post, Body, UseGuards, Get } from '@nestjs/common';
-import { RegisterDeviceTokenUseCase } from './application/register-device-token.use-case';
+import { Controller, Post, Body, UseGuards, Logger, Get } from '@nestjs/common';
+import { ApiTags, ApiOperation, ApiSecurity } from '@nestjs/swagger';
+import { AuthGuard } from '@nestjs/passport';
 import { SendNotificationUseCase } from './application/send-notification.use-case';
-import { GetNotificationsUseCase } from './application/get-notifications.use-case';
-import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
-import { GetUser } from '../auth/decorators/get-user.decorator';
+import { NotificationsService } from './notifications.service';
 
+@ApiTags('notifications')
 @Controller('notifications')
 export class NotificationsController {
+  private readonly logger = new Logger(NotificationsController.name);
+
   constructor(
-    private readonly registerDeviceTokenUseCase: RegisterDeviceTokenUseCase,
+    private readonly notificationsService: NotificationsService,
     private readonly sendNotificationUseCase: SendNotificationUseCase,
-    private readonly getNotificationsUseCase: GetNotificationsUseCase,
   ) { }
 
-  @Post('register-token')
-  @UseGuards(JwtAuthGuard)
-  async registerDeviceToken(
-    @GetUser('id') userId: number,
-    @Body() body: { token: string }
-  ) {
-    await this.registerDeviceTokenUseCase.execute(userId, body.token);
-    return { success: true, message: 'Token registered successfully' };
-  }
-
   @Get()
-  @UseGuards(JwtAuthGuard)
-  async getNotifications(@GetUser('id') userId: number) {
-    return this.getNotificationsUseCase.execute(userId);
+  @UseGuards(AuthGuard('jwt'))
+  @ApiSecurity('bearer')
+  @ApiOperation({ summary: 'Obtener notificaciones del usuario' })
+  findAll() {
+    return this.notificationsService.findAll();
   }
 
   @Post('send-test')
+  @ApiOperation({ summary: 'Enviar notificación de prueba (Solo para desarrollo)' })
   async sendTestNotification(
-    @Body()
-    body: {
+    @Body() body: {
       userId: number;
       title: string;
       body: string;

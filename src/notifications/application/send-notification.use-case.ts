@@ -11,6 +11,10 @@ export class SendNotificationUseCase {
         private readonly firebaseService: FirebaseNotificationService,
     ) { }
 
+    /**
+     * Envía una notificación push a un usuario específico.
+     * El sonido se elige automáticamente basándose en la severidad dentro del objeto data.
+     */
     async execute(
         userId: number,
         title: string,
@@ -25,12 +29,24 @@ export class SendNotificationUseCase {
                 return { success: false, message: 'User not found or no token' };
             }
 
-            // Enviar la notificación usando el servicio de infraestructura
+            // Determinar sonido según severidad (data.severity)
+            const severity = data?.severity || 'LOW';
+            const sounds = {
+                'LOW': 'low',
+                'MEDIUM': 'medium',
+                'HIGH': 'high',
+                'CRITICAL': 'critical',
+            };
+
+            const selectedSound = sounds[severity as keyof typeof sounds] || 'default';
+
+            // Enviar la notificación con todos los datos y el sonido seleccionado
             const response = await this.firebaseService.sendPushNotification(
                 user.device_token,
                 title,
                 body,
                 data,
+                selectedSound
             );
 
             return { success: true, response };

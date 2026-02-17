@@ -8,11 +8,13 @@ import { GetNotificationsUseCase } from './application/get-notifications.use-cas
 import { NotificationRepository } from './domain/repository/notification.repository';
 import { PrismaNotificationRepository } from './infrastructure/prisma-notification.repository';
 import { PrismaModule } from '../prisma/prisma.module';
+import { NotificationsService } from './notifications.service';
 
 @Module({
   imports: [ConfigModule, PrismaModule],
   controllers: [NotificationsController],
   providers: [
+    NotificationsService,
     FirebaseNotificationService,
     SendNotificationUseCase,
     RegisterDeviceTokenUseCase,

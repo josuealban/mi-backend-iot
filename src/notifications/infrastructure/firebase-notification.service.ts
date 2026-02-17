@@ -39,27 +39,6 @@ export class FirebaseNotificationService implements OnModuleInit {
             }
         }
 
-        // OPCIÓN 2: Usar archivo JSON (DESARROLLO LOCAL)
-        const firebaseCredentialsPath = this.configService.get<string>('FIREBASE_CREDENTIALS_PATH');
-
-        if (firebaseCredentialsPath) {
-            try {
-
-                const path = require('path');
-                const absolutePath = path.resolve(process.cwd(), firebaseCredentialsPath);
-                const serviceAccount = require(absolutePath);
-
-                admin.initializeApp({
-                    credential: admin.credential.cert(serviceAccount),
-                });
-
-                return;
-            } catch (error) {
-                this.logger.error('❌ Failed to initialize Firebase from file:', error.message);
-                this.logger.debug('File load error details:', error);
-            }
-        }
-
         this.logger.warn(
             '⚠️ Firebase credentials not configured. Push notifications will be disabled.\n' +
             'Please set either:\n' +
@@ -76,6 +55,7 @@ export class FirebaseNotificationService implements OnModuleInit {
         title: string,
         body: string,
         data?: Record<string, string>,
+        sound: string = 'default'
     ): Promise<string | null> {
         // Verificar si Firebase está inicializado
         if (admin.apps.length === 0) {
@@ -99,7 +79,8 @@ export class FirebaseNotificationService implements OnModuleInit {
                 android: {
                     priority: 'high',
                     notification: {
-                        sound: 'default',
+                        sound: sound,
+                        channelId: sound, // Usar el mismo nombre del sonido como ID del canal
                         priority: 'high',
                         color: data?.color || '#3b82f6',
                     },
@@ -107,7 +88,7 @@ export class FirebaseNotificationService implements OnModuleInit {
                 apns: {
                     payload: {
                         aps: {
-                            sound: 'default',
+                            sound: sound,
                             badge: 1,
                         },
                     },
