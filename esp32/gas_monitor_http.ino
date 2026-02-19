@@ -35,12 +35,12 @@ struct SensorReading {
 // ==========================================
 // CONFIGURACIÓN DE RED Y SERVIDOR
 // ==========================================
-const char* WIFI_SSID = "MarcoBuri";
-const char* WIFI_PASSWORD = "20032006";
+const char* WIFI_SSID = "YOUR_WIFI_SSID";
+const char* WIFI_PASSWORD = "YOUR_WIFI_PASSWORD";
 
-const char* SERVER_HOSTNAME = "192.168.18.143";
+const char* SERVER_HOSTNAME = "ipaddress";
 const int SERVER_PORT = 3000;
-const char* BASE_URL = "http://192.168.18.143:3000";
+const char* BASE_URL = "http://[IP_ADDRESS]";
 const char* DEVICE_KEY = "00d6644c-3785-4a2d-ae71-1ec6c81b1a9a";
 
 // ==========================================
@@ -53,7 +53,7 @@ const int MQ9_PIN = 33;   // CO
 const int LED_PIN = 2;
 const int BUZZER_PIN = 4;
 const int DHT_PIN = 25;
-const int FAN_PIN = 13;   // Relé para el ventilador
+const int FAN_PIN = 27;   // Relé para el ventilador (GPIO 27, pin limpio sin JTAG)
 const int WINDOW_SERVO_PIN = 26; // Servo MG996R
 
 #define DHTTYPE DHT11
@@ -83,6 +83,7 @@ unsigned long lastAlertTime_MQ9 = 0;
 const unsigned long STREAM_INTERVAL = 2000;  // 2 segundos (1s causa WDT crash con HTTPS alerts)
 const unsigned long ALERT_COOLDOWN = 15000; // 15 segundos mínimo entre alertas del mismo sensor
 float lastSentPpm_MQ2 = 0, lastSentPpm_MQ3 = 0, lastSentPpm_MQ5 = 0, lastSentPpm_MQ9 = 0;
+bool calibrationDone = false; // No activar actuadores hasta que termine la calibración
 
 bool wsConnected = false;
 SocketIOclient socketIO;
@@ -175,17 +176,21 @@ void updateConfigInBackend() {
     doc["mq3R0"] = r0_MQ3;
     doc["mq5R0"] = r0_MQ5;
     doc["mq9R0"] = r0_MQ9;
+    doc["mq2Threshold"] = THRESHOLD_MQ2;
+    doc["mq3Threshold"] = THRESHOLD_MQ3;
+    doc["mq5Threshold"] = THRESHOLD_MQ5;
+    doc["mq9Threshold"] = THRESHOLD_MQ9;
 
     String json;
     serializeJson(doc, json);
     int code = http.PATCH(json); 
-    Serial.printf("[CONFIG] Calibración enviada. Código: %d\n", code);
+    Serial.printf("[CONFIG] R0 + Umbrales enviados. Codigo: %d\n", code);
     http.end();
   }
 }
 
 void calibrateAllSensors() {
-  Serial.println("\n[CALIB] Iniciando auto-calibración (Aire Limpio)...");
+  Serial.println("\n[CALIB] Iniciando auto-calibracion (Aire Limpio)...");
   Serial.println("[CALIB] Favor no acercar gases durante 10 segundos.");
   
   float mq2Sum = 0, mq3Sum = 0, mq5Sum = 0, mq9Sum = 0;
@@ -197,6 +202,7 @@ void calibrateAllSensors() {
     mq5Sum += calculateRs(adcToVoltage(readSensorAvg(MQ5_PIN))) / 6.5;
     mq9Sum += calculateRs(adcToVoltage(readSensorAvg(MQ9_PIN))) / 9.0;
     delay(200);
+    yield(); // Evitar WDT reset
     if(i % 10 == 0) Serial.print(".");
   }
   
@@ -205,7 +211,27 @@ void calibrateAllSensors() {
   r0_MQ5 = mq5Sum / samples;
   r0_MQ9 = mq9Sum / samples;
   
-  Serial.printf("\n[CALIB] OK! MQ2:%.2f MQ3:%.2f MQ5:%.2f MQ9:%.2f\n", r0_MQ2, r0_MQ3, r0_MQ5, r0_MQ9);
+  Serial.printf("\n[CALIB] R0 -> MQ2:%.2f MQ3:%.2f MQ5:%.2f MQ9:%.2f\n", r0_MQ2, r0_MQ3, r0_MQ5, r0_MQ9);
+
+  // Leer PPM base del ambiente con los R0 recién calibrados
+  SensorReading baseMQ2 = readMQSensor(MQ2_PIN, r0_MQ2, 574.25, -2.222);
+  SensorReading baseMQ3 = readMQSensor(MQ3_PIN, r0_MQ3, 200.0, -1.4);
+  SensorReading baseMQ5 = readMQSensor(MQ5_PIN, r0_MQ5, 500.0, -2.5);
+  SensorReading baseMQ9 = readMQSensor(MQ9_PIN, r0_MQ9, 800.0, -2.0);
+
+  Serial.printf("[CALIB] PPM base -> MQ2:%.1f MQ3:%.1f MQ5:%.1f MQ9:%.1f\n", 
+                baseMQ2.ppm, baseMQ3.ppm, baseMQ5.ppm, baseMQ9.ppm);
+
+  // Umbrales = 3x el nivel base del ambiente (con minimos de seguridad)
+  const float MULTIPLIER = 3.0;
+  THRESHOLD_MQ2 = max(baseMQ2.ppm * MULTIPLIER, 100.0f);  // Min 100 PPM
+  THRESHOLD_MQ3 = max(baseMQ3.ppm * MULTIPLIER, 50.0f);   // Min 50 PPM
+  THRESHOLD_MQ5 = max(baseMQ5.ppm * MULTIPLIER, 80.0f);   // Min 80 PPM
+  THRESHOLD_MQ9 = max(baseMQ9.ppm * MULTIPLIER, 30.0f);   // Min 30 PPM
+
+  Serial.printf("[CALIB] Umbrales auto -> MQ2:%.0f MQ3:%.0f MQ5:%.0f MQ9:%.0f\n",
+                THRESHOLD_MQ2, THRESHOLD_MQ3, THRESHOLD_MQ5, THRESHOLD_MQ9);
+  
   updateConfigInBackend();
 }
 
@@ -292,6 +318,12 @@ void streamSensorData() {
     
     targetWindowOpen = danger || keepOn;
     targetFanOn = danger || keepOn;
+    
+    // No activar actuadores hasta que la calibración haya terminado
+    if (!calibrationDone) {
+      targetWindowOpen = false;
+      targetFanOn = false;
+    }
   } else {
     targetWindowOpen = manWindowOpen;
     targetFanOn = manFanOn;
@@ -306,7 +338,7 @@ void streamSensorData() {
 
   if (targetFanOn != currentFanOn) {
     currentFanOn = targetFanOn;
-    digitalWrite(FAN_PIN, currentFanOn ? LOW : HIGH); // Lógica invertida
+    digitalWrite(FAN_PIN, currentFanOn ? LOW : HIGH); // LOW=ON, HIGH=OFF
     Serial.printf("[ACTUATOR] Ventilador: %s\n", currentFanOn ? "ON" : "OFF");
   }
 
@@ -430,8 +462,11 @@ void setup() {
   Serial.begin(115200);
   pinMode(LED_PIN, OUTPUT);
   pinMode(BUZZER_PIN, OUTPUT);
+  // Relé activo en LOW: HIGH = apagado, LOW = prendido
+  digitalWrite(FAN_PIN, HIGH);
   pinMode(FAN_PIN, OUTPUT);
-  digitalWrite(FAN_PIN, HIGH); // Empezar apagado (Invertido)
+  digitalWrite(FAN_PIN, HIGH);  // Relé APAGADO
+  
   dht.begin();
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
   while (WiFi.status() != WL_CONNECTED) { delay(500); Serial.print("."); }
@@ -441,11 +476,13 @@ void setup() {
   configUrl = String(BASE_URL) + "/sensor-data/config/" + String(DEVICE_KEY);
   Serial.println("[HTTP] URL alerta: " + alertUrl);
   
-  // 1. Obtener umbrales guardados del backend (thresholds)
-  getConfig();
-  
-  // 2. Calibrar sensores: lee el promedio del ambiente actual y sube los R0 al backend
+  // 1. Calibrar sensores: calcula R0 + umbrales basados en el ambiente actual y los sube al backend
+  // NO llamamos getConfig() despues porque sobreescribiria los umbrales recien calculados
   calibrateAllSensors();
+  
+  // Marcar calibración como completa - ahora sí se pueden activar actuadores
+  calibrationDone = true;
+  Serial.println("[SYSTEM] Calibracion completa. Actuadores habilitados.");
   
   // Inicializar Servo
   ESP32PWM::allocateTimer(0);
@@ -461,6 +498,10 @@ void setup() {
 }
 
 void loop() {
+  // Seguridad: mantener relé apagado si la calibración no terminó
+  if (!calibrationDone) {
+    digitalWrite(FAN_PIN, HIGH); // Mantener apagado hasta calibrar
+  }
   socketIO.loop();
   if (millis() - lastStreamTime >= STREAM_INTERVAL) {
     lastStreamTime = millis();
