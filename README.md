@@ -247,9 +247,9 @@ NODE_ENV=development
 # ==========================================
 # FIREBASE (Push Notifications)
 # ==========================================
-FIREBASE_PROJECT_ID="tu-proyecto-firebase"
-FIREBASE_CLIENT_EMAIL="firebase-adminsdk-xxxxx@tu-proyecto.iam.gserviceaccount.com"
-FIREBASE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\nTU_CLAVE_PRIVADA\n-----END PRIVATE KEY-----\n"
+
+FIREBASE_CREDENTIALS_BASE64="examplebase64data"
+
 ```
 
 ### Firebase Setup
