@@ -1,811 +1,545 @@
-# 🔥 Sistema de Monitoreo de Gas con ESP32 + NestJS
+# 🖥️ Sistema IoT MQ2 Piensa — Backend API + ESP32 Firmware
 
-<p align="center">
-  <img src="https://nestjs.com/img/logo-small.svg" width="120" alt="NestJS Logo" />
-</p>
-
-<p align="center">
-  Sistema completo de monitoreo de gas en tiempo real con sensor MQ2, ESP32 y backend NestJS con notificaciones automáticas.
-</p>
+Backend del sistema de monitoreo de gases IoT. API REST construida con **NestJS** + **Prisma** + **PostgreSQL**, con comunicación en tiempo real vía **WebSocket (Socket.IO)** y notificaciones push con **Firebase Cloud Messaging (FCM)**. Incluye el firmware del **ESP32** para los sensores MQ.
 
 ---
 
 ## 📋 Tabla de Contenidos
 
-- [Descripción General](#-descripción-general)
 - [Características](#-características)
-- [Arquitectura del Sistema](#-arquitectura-del-sistema)
-- [Tecnologías](#-tecnologías)
+- [Arquitectura](#-arquitectura)
+- [Stack Tecnológico](#-stack-tecnológico)
+- [Estructura del Proyecto](#-estructura-del-proyecto)
 - [Requisitos Previos](#-requisitos-previos)
 - [Instalación](#-instalación)
+  - [Windows](#windows)
+  - [Linux](#linux)
 - [Configuración](#-configuración)
 - [Base de Datos](#-base-de-datos)
+- [Ejecución](#-ejecución)
 - [API Endpoints](#-api-endpoints)
-- [ESP32 - Firmware](#-esp32---firmware)
-- [Flujo de Alertas](#-flujo-de-alertas)
-- [Scripts Disponibles](#-scripts-disponibles)
-- [Documentación API](#-documentación-api)
-- [Estructura del Proyecto](#-estructura-del-proyecto)
-- [Troubleshooting](#-troubleshooting)
-
----
-
-## 🎯 Descripción General
-
-Este proyecto es un **sistema completo de monitoreo de gas** que integra:
-
-- **Hardware**: ESP32 + Sensor MQ2 (detección de gas LPG/Propano)
-- **Backend**: NestJS con TypeScript, Prisma ORM y PostgreSQL
-- **Comunicación**: HTTP REST API (polling cada 5 segundos)
-- **Alertas**: Sistema automático de notificaciones con cooldown para evitar spam
-- **Autenticación**: JWT con Passport
-- **Documentación**: Swagger UI integrado
-
-El sistema detecta niveles peligrosos de gas, crea alertas automáticas, envía notificaciones a los usuarios y activa LED/Buzzer en el ESP32.
+- [WebSocket Gateway](#-websocket-gateway)
+- [ESP32 Firmware](#-esp32-firmware)
 
 ---
 
 ## ✨ Características
 
-### 🔐 Autenticación y Usuarios
-- ✅ Registro de usuarios con validación
-- ✅ Login con JWT (Access Token + Refresh Token)
-- ✅ Protección de rutas con Guards
-- ✅ Encriptación de contraseñas con bcrypt
-
-### 📟 Gestión de Dispositivos
-- ✅ Registro de dispositivos ESP32 con clave única mediante UUID
-- ✅ Configuración personalizada por dispositivo
-- ✅ Estado en tiempo real (ONLINE/OFFLINE/MAINTENANCE)
-- ✅ Historial de lecturas del sensor
-
-### 🚨 Sistema de Alertas Inteligente
-- ✅ Detección automática cuando se supera el umbral de gas
-- ✅ Clasificación por severidad (LOW, MEDIUM, HIGH, CRITICAL)
-- ✅ Cooldown de 1 minuto entre alertas para evitar spam
-- ✅ Notificaciones push para usuarios
-- ✅ Activación automática de LED/Buzzer en ESP32
-
-### 📊 Monitoreo de Sensores
-- ✅ Lecturas cada 5 segundos desde ESP32
-- ✅ Almacenamiento de datos históricos
-- ✅ Estadísticas y análisis de tendencias
-- ✅ Calibración personalizada del sensor MQ2
-
-### ⚙️ Configuración Flexible
-- ✅ Umbrales personalizables (gas PPM, voltaje)
-- ✅ Control de LED y Buzzer
-- ✅ Calibración R0 del sensor
-- ✅ Configuración de cooldown de notificaciones
+- 🔑 **Autenticación JWT** con access token + refresh token
+- 📡 **WebSocket (Socket.IO)** para streaming de datos de sensores en tiempo real
+- 🔔 **Push Notifications** (Firebase Cloud Messaging) con severidad por niveles
+- 📊 **Gestión de dispositivos** con deviceKey único (UUID)
+- ⚠️ **Sistema de alertas** con 4 niveles de severidad (LOW, MEDIUM, HIGH, CRITICAL)
+- 🎛️ **Control remoto de actuadores** (ventilador + servo ventana)
+- 📐 **Calibración remota** de sensores vía WebSocket
+- 🔄 **Auto-calibración de umbrales** basada en el ambiente
+- 📖 **Swagger/OpenAPI** — documentación interactiva en `/api/docs`
+- 🐳 **Docker ready** para despliegue en producción
 
 ---
 
-## 🛠️ Tecnologías
+## 🏗️ Arquitectura
 
-### Backend
-- **Framework**: NestJS 11.x
-- **Lenguaje**: TypeScript 5.7
-- **ORM**: Prisma 7.x
-- **Base de Datos**: PostgreSQL
-- **Autenticación**: Passport JWT
-- **Validación**: class-validator, class-transformer
-- **Documentación**: Swagger/OpenAPI
-- **Encriptación**: bcrypt
-
-### Hardware
-- **Microcontrolador**: ESP32
-- **Sensor**: MQ2 (Gas LPG/Propano)
-- **Comunicación**: WiFi + HTTP Client
-- **Actuadores**: LED, Buzzer
-
-### Dependencias Principales
-```json
-{
-  "@nestjs/core": "^11.0.1",
-  "@nestjs/jwt": "^11.0.1",
-  "@nestjs/swagger": "^11.2.3",
-  "@prisma/client": "^7.0.1",
-  "bcrypt": "^6.0.0",
-  "passport-jwt": "^4.0.1",
-  "pg": "^8.16.3"
-}
+```
+┌──────────────┐         ┌──────────────────────────────────────┐
+│   ESP32      │         │            Backend (NestJS)          │
+│  ┌─────────┐ │  HTTP   │  ┌────────────┐  ┌───────────────┐  │
+│  │ MQ2-MQ9 │─┼────────▶│  │ SensorData │  │ Notifications │  │
+│  │ DHT11   │ │  Alert  │  │ Controller │  │   Service     │  │
+│  │ Relé    │ │         │  └────────────┘  └───────┬───────┘  │
+│  │ Servo   │ │  WS     │  ┌────────────┐          │          │
+│  └─────────┘─┼────────▶│  │  Sensor    │    ┌─────▼─────┐   │   ┌──────────┐
+│              │         │  │  Gateway   │    │ Firebase  │   │   │ IoTFront │
+│              │◀────────┼──│ (Socket.IO)│    │   FCM     │───┼──▶│  (App)   │
+│              │ Commands│  └────────────┘    └───────────┘   │   └──────────┘
+└──────────────┘         │  ┌────────────┐  ┌─────────────┐   │
+                         │  │   Auth     │  │   Prisma    │   │
+                         │  │  Module    │  │  (ORM)      │   │
+                         │  └────────────┘  └──────┬──────┘   │
+                         │                         │          │
+                         └─────────────────────────┼──────────┘
+                                                   │
+                                            ┌──────▼──────┐
+                                            │ PostgreSQL  │
+                                            │  Database   │
+                                            └─────────────┘
 ```
 
 ---
 
-## 📦 Requisitos Previos
+## 🛠️ Stack Tecnológico
 
-- **Node.js**: v18 o superior
-- **npm** o **pnpm**: Gestor de paquetes
-- **PostgreSQL**: v14 o superior
-- **ESP32**: Con WiFi habilitado
-- **Sensor MQ2**: Conectado al ESP32
+| Tecnología | Versión | Uso |
+|---|---|---|
+| NestJS | 11.x | Framework backend |
+| TypeScript | 5.7.x | Tipado estático |
+| Prisma | 7.x | ORM + Migraciones |
+| PostgreSQL | 15+ | Base de datos |
+| Socket.IO | 4.8.x | WebSocket en tiempo real |
+| Firebase Admin | 13.x | Push notifications (FCM) |
+| Passport JWT | 4.x | Autenticación |
+| Swagger | 11.x | Documentación API |
+| bcryptjs | 3.x | Hash de contraseñas |
+| Arduino (C++) | — | Firmware ESP32 |
+
+---
+
+## 📂 Estructura del Proyecto
+
+```
+backend/
+├── src/
+│   ├── auth/                        # Módulo de autenticación
+│   │   ├── auth.controller.ts       # Endpoints: login, register, refresh
+│   │   ├── auth.service.ts          # Lógica de autenticación + JWT
+│   │   ├── auth.module.ts           # Configuración del módulo
+│   │   ├── dto/                     # Data Transfer Objects
+│   │   │   ├── login.dto.ts
+│   │   │   ├── register.dto.ts
+│   │   │   └── refresh-token.dto.ts
+│   │   ├── guards/
+│   │   │   └── jwt-auth.guard.ts    # Guard de autenticación JWT
+│   │   ├── strategies/
+│   │   │   └── jwt.strategy.ts      # Passport JWT strategy
+│   │   └── interfaces/
+│   │       └── jwt-payload.interface.ts
+│   ├── users/                       # Módulo de usuarios
+│   │   ├── users.controller.ts      # CRUD de usuarios
+│   │   ├── users.service.ts         # Lógica de usuarios
+│   │   └── dto/
+│   ├── device/                      # Módulo de dispositivos
+│   │   ├── device.controller.ts     # CRUD de dispositivos + settings
+│   │   ├── device.service.ts        # Lógica de dispositivos
+│   │   └── dto/
+│   ├── sensor-data/                 # Módulo de datos de sensores
+│   │   ├── sensor-data.controller.ts # Alertas, config, actuadores
+│   │   ├── sensor-data.service.ts   # Lógica de sensores + alertas
+│   │   ├── sensor.gateway.ts        # WebSocket Gateway (Socket.IO)
+│   │   └── dto/
+│   ├── notifications/               # Módulo de notificaciones
+│   │   ├── notifications.controller.ts  # CRUD notificaciones
+│   │   ├── notifications.service.ts     # Servicio base
+│   │   ├── application/
+│   │   │   ├── notification-creator.service.ts   # Crear notificaciones + FCM
+│   │   │   └── notification-query.service.ts     # Consultas
+│   │   ├── infrastructure/
+│   │   │   └── firebase-messaging.service.ts     # Firebase Admin SDK
+│   │   └── domain/
+│   │       └── notification-severity.ts          # Lógica de severidad
+│   ├── prisma/
+│   │   ├── prisma.module.ts         # Módulo Prisma
+│   │   └── prisma.service.ts        # Servicio de conexión a DB
+│   ├── app.module.ts                # Módulo raíz
+│   └── main.ts                      # Bootstrap de la aplicación
+├── prisma/
+│   ├── schema.prisma                # Esquema de base de datos
+│   └── migrations/                  # Migraciones de DB
+├── esp32/                           # Firmware del microcontrolador
+│   ├── gas_monitor_http.ino         # Código Arduino del ESP32
+│   └── README.md                    # Documentación del hardware
+├── .env                             # Variables de entorno (NO se sube)
+├── .gitignore
+├── package.json
+├── tsconfig.json
+├── nest-cli.json
+└── Dockerfile                       # (si existe) Para despliegue
+```
+
+---
+
+## 📌 Requisitos Previos
+
+- **Node.js** >= 18.x
+- **npm** >= 9.x (o pnpm)
+- **Git**
+- **PostgreSQL** >= 15 (local o remoto)
+- **Firebase Project** con credenciales de Admin SDK (para push notifications)
+
+### Para el ESP32
+
+- **Arduino IDE** >= 2.x o **PlatformIO**
+- **ESP32 DevKit** v1
+- Sensores: MQ2, MQ3, MQ5, MQ9, DHT11
+- Actuadores: Relé 5V, Servo MG996R
+- LED, Buzzer
 
 ---
 
 ## 🚀 Instalación
 
-### 1. Clonar el repositorio
-```bash
-git clone <repository-url>
-cd backend
-```
+### Windows
 
-### 2. Instalar dependencias
-```bash
+```powershell
+# 1. Clonar el repositorio
+git clone https://github.com/Guasmo/sistemaIoTmq2Piensa.git
+cd sistemaIoTmq2Piensa
+
+# 2. Instalar dependencias
 npm install
-# o
-pnpm install
-```
 
-### 3. Configurar variables de entorno
-Crea un archivo `.env` en la raíz del proyecto:
+# 3. Crear archivo de variables de entorno
+copy NUL .env
+# Luego editar con VS Code o notepad (ver sección Configuración)
 
-```env
-# Base de Datos
-DATABASE_URL="postgresql://usuario:contraseña@localhost:5432/nombre_db?schema=public"
-
-# JWT
-JWT_SECRET="tu_clave_secreta_super_segura_aqui"
-JWT_EXPIRES_IN="1h"
-JWT_REFRESH_SECRET="tu_refresh_secret_super_segura"
-JWT_REFRESH_EXPIRES_IN="7d"
-
-# Servidor
-PORT=3000
-NODE_ENV=development
-```
-
-### 4. Configurar la base de datos
-```bash
-# Generar el cliente de Prisma
+# 4. Generar el cliente Prisma
 npx prisma generate
 
-# Ejecutar migraciones
-npx prisma migrate dev
+# 5. Aplicar migraciones a la base de datos
+npx prisma migrate deploy
 
-# (Opcional) Abrir Prisma Studio para ver la BD
+# 6. (Opcional) Ver la base de datos con Prisma Studio
 npx prisma studio
 ```
 
-### 5. Iniciar el servidor
+### Linux
+
 ```bash
-# Modo desarrollo (con hot-reload)
-npm run start:dev
+# 1. Clonar el repositorio
+git clone https://github.com/Guasmo/sistemaIoTmq2Piensa.git
+cd sistemaIoTmq2Piensa
 
-# Modo producción
-npm run build
-npm run start:prod
+# 2. Instalar dependencias
+npm install
+
+# 3. Crear archivo de variables de entorno
+touch .env
+# Luego editar (ver sección Configuración)
+nano .env
+
+# 4. Generar el cliente Prisma
+npx prisma generate
+
+# 5. Aplicar migraciones a la base de datos
+npx prisma migrate deploy
+
+# 6. (Opcional) Ver la base de datos con Prisma Studio
+npx prisma studio
 ```
-
-El servidor estará disponible en: `http://localhost:3000`
 
 ---
 
 ## ⚙️ Configuración
 
-### Variables de Entorno
+### Variables de Entorno (`.env`)
 
-| Variable | Descripción | Valor por Defecto |
-|----------|-------------|-------------------|
-| `DATABASE_URL` | URL de conexión a PostgreSQL | - |
-| `JWT_SECRET` | Clave secreta para JWT | - |
-| `JWT_EXPIRES_IN` | Tiempo de expiración del token | `1h` |
-| `JWT_REFRESH_SECRET` | Clave para refresh token | - |
-| `JWT_REFRESH_EXPIRES_IN` | Expiración del refresh token | `7d` |
-| `PORT` | Puerto del servidor | `3000` |
+Crea un archivo `.env` en la raíz del proyecto con las siguientes variables:
 
-### Configuración del ESP32
+```env
+# ==========================================
+# BASE DE DATOS
+# ==========================================
+DATABASE_URL="postgresql://usuario:password@localhost:5432/iot_database?schema=public"
 
-Edita el archivo `esp32/gas_monitor_http.ino`:
+# ==========================================
+# AUTENTICACIÓN JWT
+# ==========================================
+JWT_SECRET="tu_clave_secreta_jwt_muy_segura"
+JWT_EXPIRES_IN="1h"
+JWT_REFRESH_SECRET="tu_clave_secreta_refresh_muy_segura"
+JWT_REFRESH_EXPIRES_IN="7d"
 
-```cpp
-// WiFi
-const char* WIFI_SSID = "TuRedWiFi";
-const char* WIFI_PASSWORD = "TuContraseña";
+# ==========================================
+# SERVIDOR
+# ==========================================
+PORT=3000
+NODE_ENV=development
 
-// Servidor Backend
-const char* SERVER_HOST = "192.168.1.100";  // IP de tu computadora
-const int SERVER_PORT = 3000;
-
-// Device Key (obtener del backend después de registrar el dispositivo)
-const char* DEVICE_KEY = "tu-device-key-aqui";
+# ==========================================
+# FIREBASE (Push Notifications)
+# ==========================================
+FIREBASE_PROJECT_ID="tu-proyecto-firebase"
+FIREBASE_CLIENT_EMAIL="firebase-adminsdk-xxxxx@tu-proyecto.iam.gserviceaccount.com"
+FIREBASE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\nTU_CLAVE_PRIVADA\n-----END PRIVATE KEY-----\n"
 ```
+
+### Firebase Setup
+
+1. Ir a [Firebase Console](https://console.firebase.google.com/) → Tu proyecto
+2. **Project Settings** → **Service accounts** → **Generate new private key**
+3. Del JSON descargado, extraer los valores de `project_id`, `client_email` y `private_key`
+4. Colocarlos en las variables `FIREBASE_*` del `.env`
+
+> ⚠️ **IMPORTANTE**: Nunca subas el archivo de credenciales Firebase ni el `.env` a git.
 
 ---
 
 ## 🗄️ Base de Datos
 
-### Modelos Principales
+### Esquema (Modelos principales)
 
-#### **User** (Usuarios)
-```typescript
-{
-  id: number
-  username: string
-  email: string
-  password: string (hash)
-  isActive: boolean
-  devices: Device[]
-  notifications: Notification[]
-}
-```
+| Modelo | Descripción |
+|---|---|
+| `User` | Usuarios del sistema (username, email, password hash, device token FCM) |
+| `Device` | Dispositivos IoT (nombre, deviceKey UUID, estado, ubicación, estado de actuadores) |
+| `DeviceSettings` | Configuración por dispositivo (umbrales MQ, R0 calibración, buzzer, LED, etc.) |
+| `Alert` | Alertas de gas (tipo, severidad, PPM, voltaje, estado de resolución) |
+| `Notification` | Notificaciones al usuario (título, mensaje, tipo, leída/no leída) |
 
-#### **Device** (Dispositivos ESP32)
-```typescript
-{
-  id: number
-  userId: number
-  name: string
-  deviceKey: string (UUID único)
-  status: 'ONLINE' | 'OFFLINE' | 'MAINTENANCE'
-  location: string
-  lastSeen: DateTime
-  deviceSettings: DeviceSettings
-  sensorData: SensorData[]
-  alerts: Alert[]
-}
-```
+### Enums
 
-#### **SensorData** (Lecturas del Sensor)
-```typescript
-{
-  id: number
-  deviceId: number
-  rawValue: number
-  voltage: number
-  gasConcentrationPpm: number
-  rsRoRatio: number
-  thresholdPassed: boolean
-  createdAt: DateTime
-}
-```
+| Enum | Valores |
+|---|---|
+| `DeviceStatus` | ONLINE, OFFLINE, MAINTENANCE |
+| `AlertType` | GAS_DETECTED, SENSOR_ERROR, OFFLINE, MAINTENANCE_REQUIRED |
+| `AlertSeverity` | LOW, MEDIUM, HIGH, CRITICAL |
+| `GasType` | LPG, METHANE, ALCOHOL, CO, SMOKE, UNKNOWN |
+| `NotificationType` | ALERT, INFO, WARNING, SUCCESS |
 
-#### **Alert** (Alertas)
-```typescript
-{
-  id: number
-  deviceId: number
-  alertType: 'GAS_DETECTED' | 'SENSOR_ERROR' | 'OFFLINE'
-  severity: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL'
-  message: string
-  gasValuePpm: number
-  resolved: boolean
-  createdAt: DateTime
-}
-```
-
-#### **Notification** (Notificaciones)
-```typescript
-{
-  id: number
-  userId: number
-  alertId: number
-  title: string
-  message: string
-  type: 'ALERT' | 'INFO' | 'WARNING' | 'SUCCESS'
-  read: boolean
-  createdAt: DateTime
-}
-```
-
-#### **DeviceSettings** (Configuración)
-```typescript
-{
-  id: number
-  deviceId: number
-  gasThresholdPpm: number (default: 300)
-  voltageThreshold: number (default: 1.5)
-  buzzerEnabled: boolean
-  ledEnabled: boolean
-  notifyUser: boolean
-  calibrationR0: number (default: 10.0)
-}
-```
-
-### Diagrama de Relaciones
-
-```
-User (1) ──────< (N) Device
-                      │
-                      ├──< (N) SensorData
-                      ├──< (N) Alert
-                      └──< (1) DeviceSettings
-
-User (1) ──────< (N) Notification
-Alert (1) ─────< (N) Notification
-```
-
----
-
-### 📟 Dispositivos (`/device`)
-
-| Método | Endpoint | Descripción | Auth |
-|--------|----------|-------------|------|
-| POST | `/device` | Crear nuevo dispositivo | ✅ |
-| GET | `/device` | Listar todos los dispositivos | ✅ |
-| DELETE | `/device/:id` | Desactivar dispositivo | ✅ |
-| POST | `/device/:id/settings` | Crear configuración | ✅ |
-| PATCH | `/device/:id/settings` | Actualizar configuración | ✅ |
-| GET | `/device/:id/settings` | Obtener configuración | ✅ |
-
-**Ejemplo - Crear Dispositivo:**
-```bash
-curl -X POST http://localhost:3000/device \
-  -H "Authorization: Bearer <tu-token>" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "name": "Sensor Cocina",
-    "description": "Sensor de gas en la cocina",
-    "location": "Cocina principal"
-  }'
-```
-
-**Respuesta:**
-```json
-{
-  "id": 1,
-  "name": "Sensor Cocina",
-  "deviceKey": "00d6644c-3785-4a2d-ae71-1ec6c81b1a9a",
-  "userId": 1,
-  "createdAt": "2025-12-05T22:00:00.000Z"
-}
-```
-
-**Ejemplo - Configurar Dispositivo:**
-```bash
-curl -X POST http://localhost:3000/device/1/settings \
-  -H "Authorization: Bearer <tu-token>" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "gasThresholdPpm": 500,
-    "voltageThreshold": 2.5,
-    "buzzerEnabled": true,
-    "ledEnabled": true,
-    "calibrationR0": 10.0
-  }'
-```
-
----
-
-### 📊 Datos del Sensor (`/sensor-data`)
-
-| Método | Endpoint | Descripción | Auth |
-|--------|----------|-------------|------|
-| POST | `/sensor-data` | Recibir datos del ESP32 | ❌ |
-| GET | `/sensor-data/command/:deviceKey` | ESP32 obtiene comandos | ❌ |
-| GET | `/sensor-data/config/:deviceKey` | ESP32 obtiene configuración | ❌ |
-
-**Ejemplo - Enviar Datos (desde ESP32):**
-```bash
-curl -X POST http://localhost:3000/sensor-data \
-  -H "Content-Type: application/json" \
-  -d '{
-    "deviceKey": "00d6644c-3785-4a2d-ae71-1ec6c81b1a9a",
-    "rawValue": 1500,
-    "voltage": 1.8,
-    "gasConcentrationPpm": 650,
-    "rsRoRatio": 0.5
-  }'
-```
-
-**Respuesta:**
-```json
-{
-  "success": true,
-  "message": "Data received successfully",
-  "thresholdPassed": true,
-  "command": {
-    "ledState": true,
-    "buzzerState": true,
-    "message": "Gas threshold exceeded!",
-    "timestamp": "2025-12-05T22:34:21.000Z"
-  }
-}
-```
-
----
-
-
-### Configuración del Código
-
-1. **Abrir Arduino IDE**
-2. **Instalar librerías necesarias:**
-   - WiFi (incluida en ESP32)
-   - HTTPClient (incluida en ESP32)
-   - ArduinoJson (v6.x)
-
-3. **Configurar WiFi y Servidor:**
-```cpp
-const char* WIFI_SSID = "TuRedWiFi";
-const char* WIFI_PASSWORD = "TuContraseña";
-const char* SERVER_HOST = "192.168.1.100";  // IP de tu PC
-const int SERVER_PORT = 3000;
-const char* DEVICE_KEY = "tu-device-key-desde-backend";
-```
-
-### Logs del ESP32
-
-```
-========================================
-  ESP32 - Monitor de Gas MQ2
-  Comunicación HTTP
-========================================
-[WiFi] Conectando...
-[WiFi] ✅ Conectado!
-[WiFi] IP: 192.168.1.105
-
-[HTTP] URLs configuradas:
-  POST: http://192.168.1.100:3000/sensor-data
-  GET:  http://192.168.1.100:3000/sensor-data/command/00d6644c...
-  GET:  http://192.168.1.100:3000/sensor-data/config/00d6644c...
-
-========== LECTURA DEL SENSOR ==========
-Raw ADC: 1500
-Voltage: 1.800 V
-Rs: 5.50 kΩ
-Rs/R0: 0.550
-Gas: 650.25 PPM
-========================================
-[HTTP] ✅ Respuesta del servidor (200)
-[COMMAND] LED: ON, Buzzer: ON
-[ALERT] Gas threshold exceeded!
-```
-
----
-
-## 🚨 Flujo de Alertas
-
-### 1. Detección de Gas Alto
-
-```typescript
-// ESP32 envía lectura
-POST /sensor-data
-{
-  "deviceKey": "...",
-  "gasConcentrationPpm": 1108.06  // > 300 (umbral)
-}
-```
-
-### 2. Backend Procesa
-
-```typescript
-// sensor-data.service.ts
-async processSensorReading(data) {
-  // 1. Verificar dispositivo
-  const device = await prisma.device.findUnique(...)
-  
-  // 2. Verificar umbral
-  const thresholdPassed = data.gasConcentrationPpm > settings.gasThresholdPpm
-  
-  // 3. Guardar lectura
-  await prisma.sensorData.create(...)
-  
-  // 4. Si se superó el umbral
-  if (thresholdPassed && settings.notifyUser) {
-    await createAlertAndNotification(device, data)
-  }
-}
-```
-
-### 3. Crear Alerta y Notificación
-
-```typescript
-async createAlertAndNotification(device, data) {
-  // Verificar cooldown (1 minuto)
-  const recentAlert = await prisma.alert.findFirst({
-    where: {
-      deviceId: device.id,
-      resolved: false,
-      createdAt: { gte: new Date(Date.now() - 1 * 60 * 1000) }
-    }
-  })
-  
-  if (recentAlert) {
-    // Cooldown activo - no crear alerta duplicada
-    return
-  }
-  
-  // Determinar severidad
-  const severity = determineSeverity(data.gasConcentrationPpm)
-  // < 400: LOW, 400-599: MEDIUM, 600-999: HIGH, >= 1000: CRITICAL
-  
-  // Crear alerta
-  const alert = await prisma.alert.create({
-    data: {
-      deviceId: device.id,
-      alertType: 'GAS_DETECTED',
-      severity,
-      message: `Gas detected: ${data.gasConcentrationPpm} PPM`,
-      gasValuePpm: data.gasConcentrationPpm
-    }
-  })
-  
-  // Crear notificación
-  await prisma.notification.create({
-    data: {
-      userId: device.userId,
-      alertId: alert.id,
-      title: `⚠️ Gas Alert - ${device.name}`,
-      message: `Gas concentration of ${data.gasConcentrationPpm} PPM detected`,
-      type: 'ALERT'
-    }
-  })
-}
-```
-
-### 4. Enviar Comando al ESP32
-
-```typescript
-// sensor-data.controller.ts
-if (result.thresholdPassed) {
-  this.pendingCommands.set(data.deviceKey, {
-    ledState: true,
-    buzzerState: true,
-    message: 'Gas threshold exceeded!'
-  })
-}
-
-return {
-  success: true,
-  thresholdPassed: true,
-  command: { ledState: true, buzzerState: true }
-}
-```
-
-### 5. ESP32 Activa LED/Buzzer
-
-```cpp
-// gas_monitor_http.ino
-if (responseDoc.containsKey("command")) {
-  JsonObject command = responseDoc["command"];
-  bool ledState = command["ledState"];
-  bool buzzerState = command["buzzerState"];
-  
-  digitalWrite(LED_PIN, ledState ? HIGH : LOW);
-  digitalWrite(BUZZER_PIN, buzzerState ? HIGH : LOW);
-}
-```
-
----
-
-## 📜 Scripts Disponibles
+### Comandos útiles de Prisma
 
 ```bash
-# Desarrollo
-npm run start:dev          # Inicia servidor en modo watch
-npm run start:debug        # Inicia con debugger
+# Generar cliente (después de cambios en schema)
+npx prisma generate
+
+# Crear nueva migración
+npx prisma migrate dev --name nombre_migracion
+
+# Aplicar migraciones pendientes (producción)
+npx prisma migrate deploy
+
+# Abrir Prisma Studio (GUI de la DB)
+npx prisma studio
+
+# Reset completo de la DB (¡CUIDADO! Borra todo)
+npx prisma migrate reset
+```
+
+---
+
+## ▶️ Ejecución
+
+```bash
+# Desarrollo (hot reload)
+npm run start:dev
 
 # Producción
-npm run build              # Compila TypeScript
-npm run start:prod         # Inicia servidor compilado
+npm run build
+npm run start:prod
 
-# Base de Datos
-npx prisma generate        # Genera cliente Prisma
-npx prisma migrate dev     # Ejecuta migraciones
-npx prisma studio          # Abre interfaz visual de BD
-npx prisma db seed         # Ejecuta seeds (si existen)
-
-# Testing
-npm run test               # Tests unitarios
-npm run test:watch         # Tests en modo watch
-npm run test:cov           # Cobertura de tests
-npm run test:e2e           # Tests end-to-end
-
-# Calidad de Código
-npm run lint               # ESLint
-npm run format             # Prettier
+# Debug mode
+npm run start:debug
 ```
 
----
+El servidor arrancará en `http://localhost:3000` (o el puerto configurado).
 
-## 📚 Documentación API
+### Swagger (Documentación API)
 
-### Swagger UI
-
-Una vez iniciado el servidor, accede a la documentación interactiva:
+Una vez corriendo, accede a la documentación interactiva en:
 
 ```
 http://localhost:3000/api/docs
 ```
 
-Características de Swagger:
-- ✅ Todos los endpoints documentados
-- ✅ Ejemplos de request/response
-- ✅ Probar endpoints directamente
-- ✅ Autenticación JWT integrada
+---
 
-### Autenticación en Swagger
+## 📡 API Endpoints
 
-1. Hacer login en `/auth/login`
-2. Copiar el `accessToken` de la respuesta
-3. Clic en el botón **"Authorize"** (🔒)
-4. Pegar el token en el campo
-5. Ahora puedes probar endpoints protegidos
+### Auth (`/auth`)
+
+| Método | Endpoint | Descripción | Auth |
+|---|---|---|---|
+| POST | `/auth/register` | Registrar usuario | ❌ |
+| POST | `/auth/login` | Iniciar sesión | ❌ |
+| POST | `/auth/refresh` | Refrescar access token | ❌ |
+| GET | `/auth/check-status` | Verificar sesión | ✅ |
+
+### Users (`/users`)
+
+| Método | Endpoint | Descripción | Auth |
+|---|---|---|---|
+| GET | `/users` | Listar usuarios | ✅ |
+| GET | `/users/:id` | Obtener usuario por ID | ✅ |
+| PATCH | `/users/:id` | Actualizar perfil | ✅ |
+| PATCH | `/users/:id/deactivate` | Desactivar usuario | ✅ |
+
+### Devices (`/device`)
+
+| Método | Endpoint | Descripción | Auth |
+|---|---|---|---|
+| GET | `/device` | Listar dispositivos del usuario | ✅ |
+| POST | `/device` | Crear dispositivo (genera deviceKey) | ✅ |
+| GET | `/device/:id` | Obtener dispositivo con sensores y alertas | ✅ |
+| PATCH | `/device/:id` | Actualizar dispositivo | ✅ |
+| PATCH | `/device/:id/settings` | Actualizar configuración | ✅ |
+
+### Sensor Data (`/sensor-data`)
+
+| Método | Endpoint | Descripción | Auth |
+|---|---|---|---|
+| POST | `/sensor-data/alert` | ESP32 envía alerta de gas | ❌* |
+| GET | `/sensor-data/config/:deviceKey` | Obtener configuración del dispositivo | ❌* |
+| PATCH | `/sensor-data/config/:deviceKey` | Actualizar calibración R0 + umbrales | ❌* |
+| POST | `/sensor-data/actuator` | Control manual de actuador | ✅ |
+| POST | `/sensor-data/calibrate` | Solicitar calibración remota | ✅ |
+| PATCH | `/sensor-data/alerts/:id/resolve` | Resolver alerta | ✅ |
+
+> *Estos endpoints son usados por el ESP32 y se autentican por `deviceKey`.
+
+### Notifications (`/notifications`)
+
+| Método | Endpoint | Descripción | Auth |
+|---|---|---|---|
+| GET | `/notifications` | Listar notificaciones del usuario | ✅ |
+| GET | `/notifications/unread` | Notificaciones no leídas | ✅ |
+| PATCH | `/notifications/:id/read` | Marcar como leída | ✅ |
+| PATCH | `/notifications/read-all` | Marcar todas como leídas | ✅ |
+| POST | `/notifications/register-token` | Registrar token FCM | ✅ |
 
 ---
 
-## 📁 Estructura del Proyecto
+## 🔌 WebSocket Gateway
 
-```
-backend/
-├── src/
-│   ├── auth/                    # Módulo de autenticación
-│   │   ├── decorators/          # Decoradores personalizados
-│   │   ├── dto/                 # DTOs de auth
-│   │   ├── guards/              # Guards JWT
-│   │   ├── strategies/          # Estrategias Passport
-│   │   ├── auth.controller.ts
-│   │   ├── auth.service.ts
-│   │   └── auth.module.ts
-│   │
-│   ├── users/                   # Módulo de usuarios
-│   │   ├── dto/
-│   │   ├── users.controller.ts
-│   │   ├── users.service.ts
-│   │   └── users.module.ts
-│   │
-│   ├── device/                  # Módulo de dispositivos
-│   │   ├── dto/
-│   │   ├── device.controller.ts
-│   │   ├── device.service.ts
-│   │   └── device.module.ts
-│   │
-│   ├── sensor-data/             # Módulo de datos del sensor
-│   │   ├── dto/
-│   │   ├── sensor-data.controller.ts
-│   │   ├── sensor-data.service.ts
-│   │   └── sensor-data.module.ts
-│   │
-│   ├── prisma/                  # Módulo de Prisma
-│   │   ├── prisma.service.ts
-│   │   └── prisma.module.ts
-│   │
-│   ├── app.module.ts            # Módulo principal
-│   └── main.ts                  # Punto de entrada
-│
-├── prisma/
-│   ├── schema.prisma            # Esquema de base de datos
-│   └── migrations/              # Migraciones
-│
-├── esp32/
-│   └── gas_monitor_http.ino     # Firmware ESP32
-│
-├── test/                        # Tests
-├── .env                         # Variables de entorno
-├── package.json
-├── tsconfig.json
-└── README.md
-```
+El backend usa **Socket.IO** en el mismo puerto del servidor HTTP.
+
+### Eventos del Cliente → Servidor
+
+| Evento | Payload | Descripción |
+|---|---|---|
+| `register` | `{ deviceKey: string }` | ESP32 se registra con su clave |
+| `subscribe` | `{ deviceKey: string }` | App se suscribe a un dispositivo |
+| `unsubscribe` | `{ deviceKey: string }` | App se desuscribe |
+| `sensorData` | `{ deviceKey, mq2, mq3, mq5, mq9, temperature, humidity }` | ESP32 envía datos |
+
+### Eventos del Servidor → Cliente
+
+| Evento | Payload | Descripción |
+|---|---|---|
+| `sensorUpdate` | `{ deviceKey, mq2, mq3, mq5, mq9, temperature, humidity }` | Datos retransmitidos a la app |
+| `actuatorCommand` | `{ actuator: 'window'|'fan', status: boolean }` | Comando al ESP32 |
+| `calibrate` | `{}` | Orden de calibración al ESP32 |
 
 ---
 
-## 🐛 Troubleshooting
+## 🔧 ESP32 Firmware
 
-### Problema: ESP32 no se conecta al WiFi
+El firmware se encuentra en `esp32/gas_monitor_http.ino`.
 
-**Solución:**
+### Hardware necesario
+
+| Componente | Pin ESP32 | Descripción |
+|---|---|---|
+| MQ2 | GPIO 34 | Sensor LPG / Humo |
+| MQ3 | GPIO 35 | Sensor Alcohol |
+| MQ5 | GPIO 32 | Sensor Metano |
+| MQ9 | GPIO 33 | Sensor CO |
+| DHT11 | GPIO 25 | Temperatura y humedad |
+| Relé (Ventilador) | GPIO 27 | Control ON/OFF (lógica invertida) |
+| Servo MG996R | GPIO 26 | Simulación de ventana |
+| LED | GPIO 2 | Indicador visual |
+| Buzzer | GPIO 4 | Alarma sonora |
+
+### Configuración del Firmware
+
+Antes de subir el código al ESP32, editar estas líneas en `gas_monitor_http.ino`:
+
 ```cpp
-// Verifica las credenciales
-const char* WIFI_SSID = "NombreExactoDeRed";
-const char* WIFI_PASSWORD = "ContraseñaCorrecta";
+// Red WiFi
+const char* WIFI_SSID = "TU_RED_WIFI";
+const char* WIFI_PASSWORD = "TU_CONTRASEÑA_WIFI";
 
-// Verifica que el ESP32 esté en rango
-// Verifica que la red sea 2.4GHz (ESP32 no soporta 5GHz)
+// Servidor backend
+const char* SERVER_HOSTNAME = "TU_IP_O_DOMINIO";
+const int SERVER_PORT = 3000;
+const char* BASE_URL = "http://TU_IP_O_DOMINIO:3000";
+
+// Clave del dispositivo (generada al crear el dispositivo en la app)
+const char* DEVICE_KEY = "tu-device-key-uuid";
 ```
 
-### Problema: "Device with key X not found"
+### Librerías Arduino necesarias
 
-**Solución:**
-1. Registra el dispositivo en el backend primero:
-```bash
-POST /device
+Instalar desde el **Library Manager** de Arduino IDE:
+
+| Librería | Uso |
+|---|---|
+| `WiFi` | Conexión WiFi (incluida con ESP32) |
+| `HTTPClient` | Peticiones HTTP |
+| `ArduinoJson` | Serialización JSON |
+| `DHT sensor library` | Lectura DHT11 |
+| `WebSockets` (by Links2004) | Socket.IO client |
+| `ESP32Servo` | Control de servomotores |
+
+### Subir el firmware
+
+1. Abrir `esp32/gas_monitor_http.ino` en Arduino IDE
+2. Seleccionar **Board**: `ESP32 Dev Module`
+3. Seleccionar el **Puerto** COM correcto
+4. Configurar las variables (WiFi, Server, Device Key)
+5. **Upload** (→)
+
+### Flujo del ESP32
+
 ```
-2. Copia el `deviceKey` de la respuesta
-3. Actualiza el firmware del ESP32 con ese `deviceKey`
-
-### Problema: No se crean alertas
-
-**Verificar:**
-1. El umbral de gas en la configuración:
-```bash
-GET /device/:id/settings
-```
-2. Que `notifyUser` esté en `true`
-3. Que no haya cooldown activo (esperar 1 minuto)
-
-### Problema: "Alert cooldown active"
-
-**Esto es normal**. El sistema tiene un cooldown de 1 minuto para evitar spam de notificaciones. Si quieres cambiarlo:
-
-```typescript
-// src/sensor-data/sensor-data.service.ts (línea 109)
-gte: new Date(Date.now() - 1 * 60 * 1000), // Cambiar a 30 segundos: 0.5 * 60 * 1000
-```
-
-### Problema: Lecturas del sensor incorrectas
-
-**Solución:**
-1. Calibrar el sensor (dejar 24h en aire limpio)
-2. Calcular R0 correcto
-3. Actualizar en la configuración:
-```bash
-PATCH /device/:id/settings
-{
-  "calibrationR0": 12.5  // Tu valor calculado
-}
-```
-
-### Problema: Error de conexión a PostgreSQL
-
-**Verificar:**
-1. PostgreSQL está corriendo:
-```bash
-sudo systemctl status postgresql
-```
-2. Credenciales correctas en `.env`
-3. Base de datos existe:
-```bash
-psql -U usuario -d nombre_db
+Encendido → Conexión WiFi → Calibración auto (10s)
+     ↓
+Cálculo de R0 + Umbrales automáticos
+     ↓
+Conexión WebSocket → Registro con deviceKey
+     ↓
+Loop cada 2s:
+  ├── Leer sensores MQ2, MQ3, MQ5, MQ9, DHT11
+  ├── Enviar datos por WebSocket (instantáneo)
+  ├── Evaluar umbrales → Activar actuadores si peligro
+  ├── Enviar alerta HTTP si supera umbral (con cooldown 15s)
+  └── Buzzer según severidad
 ```
 
 ---
 
-## 📊 Monitoreo y Logs
+## 🚀 Despliegue en Producción
 
-### Ver logs del backend en tiempo real
+### Con Docker
+
 ```bash
-npm run start:dev
+# Build de la imagen
+docker build -t iot-backend .
+
+# Ejecutar el contenedor
+docker run -d \
+  --name iot-backend \
+  -p 3000:3000 \
+  --env-file .env \
+  iot-backend
 ```
 
-### Ver datos en Prisma Studio
-```bash
-npx prisma studio
-# Abre http://localhost:5555
-```
+### Con Railway / Render
 
-### Logs importantes del ESP32
-- `[WiFi] ✅ Conectado!` - WiFi OK
-- `[HTTP] ✅ Respuesta del servidor (200)` - Comunicación OK
-- `[ALERT] Gas threshold exceeded!` - Alerta detectada
-- `[COMMAND] LED: ON, Buzzer: ON` - Actuadores activados
+1. Conectar el repositorio de GitHub
+2. Configurar las variables de entorno en el dashboard
+3. El build command es: `npm run build`
+4. El start command es: `npm run start:prod`
+5. Agregar un servicio PostgreSQL y configurar `DATABASE_URL`
+
+### Variables de entorno para producción
+
+```env
+NODE_ENV=production
+DATABASE_URL=postgresql://user:pass@host:5432/dbname
+JWT_SECRET=clave_super_segura_produccion
+JWT_REFRESH_SECRET=otra_clave_segura_produccion
+PORT=3000
+FIREBASE_PROJECT_ID=...
+FIREBASE_CLIENT_EMAIL=...
+FIREBASE_PRIVATE_KEY=...
+```
 
 ---
 
-## 🔒 Seguridad
+## 🧪 Tests
 
-- ✅ Contraseñas hasheadas con bcrypt (10 rounds)
-- ✅ JWT con expiración configurable
-- ✅ Refresh tokens para renovación segura
-- ✅ Validación de DTOs con class-validator
-- ✅ Guards para protección de rutas
-- ✅ CORS habilitado para ESP32
-- ✅ Variables sensibles en `.env` (gitignored)
+```bash
+# Unit tests
+npm run test
 
----
+# E2E tests
+npm run test:e2e
 
-## 📈 Próximas Mejoras
-
-- [ ] Dashboard web con gráficas
-- [ ] Notificaciones push
+# Cobertura
+npm run test:cov
+```
 
 ---
 
 ## 📄 Licencia
 
-Este proyecto es de código abierto y está disponible bajo la licencia MIT.
-
----
-
-## 🙏 Agradecimientos
-
-- NestJS Team por el increíble framework
-- Prisma Team por el maravillosoORM
-- Espressif por el ESP32
-- Comunidad de Arduino
-
----
-
-<p align="center">
-  Hecho con ❤️ y ☕
-</p>
+Este proyecto es parte de un trabajo de grado. Uso educativo.
