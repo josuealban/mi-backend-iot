@@ -98,18 +98,8 @@ export class SensorDataService {
                 },
             });
 
-            // Crear notificación para el usuario
-            const notification = await this.prisma.notification.create({
-                data: {
-                    userId: device.userId,
-                    alertId: alert.id,
-                    title: `${severityText}: ${gasTypeLabel}`,
-                    message: `${device.name}: ${data.gasConcentrationPpm?.toFixed(1)} PPM (${data.sensorSource})`,
-                    type: NotificationType.ALERT,
-                    read: false,
-                    sent: true,
-                },
-            });
+            // La notificación se crea automáticamente dentro de sendNotificationUseCase.execute
+            // para evitar duplicidad y asegurar que se registre tanto en envíos de alertas reales como de prueba.
 
             // Mapear color de severidad para Firebase
             const severityColors: Record<AlertSeverity, string> = {
