@@ -1,8 +1,10 @@
-import { Controller, Post, Body, UseGuards, Logger, Get } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiSecurity } from '@nestjs/swagger';
+import { Controller, Post, Body, UseGuards, Logger, Get, Req } from '@nestjs/common';
+import { ApiTags, ApiOperation, ApiSecurity, ApiResponse } from '@nestjs/swagger';
 import { AuthGuard } from '@nestjs/passport';
 import { SendNotificationUseCase } from './application/send-notification.use-case';
 import { NotificationsService } from './notifications.service';
+import { JwtAuthGuard } from 'src/auth/guards/jwt-auth.guard';
+import { GetUser } from 'src/auth/decorators/get-user.decorator';
 
 @ApiTags('notifications')
 @Controller('notifications')
@@ -15,11 +17,25 @@ export class NotificationsController {
   ) { }
 
   @Get()
-  @UseGuards(AuthGuard('jwt'))
+  @UseGuards(JwtAuthGuard)
   @ApiSecurity('bearer')
   @ApiOperation({ summary: 'Obtener notificaciones del usuario' })
-  findAll() {
-    return this.notificationsService.findAll();
+  findAll(@GetUser('id') userId: number) {
+    return this.notificationsService.findAll(userId);
+  }
+
+  @Post('register-token')
+  @UseGuards(JwtAuthGuard)
+  @ApiSecurity('bearer')
+  @ApiOperation({ summary: 'Registrar token de dispositivo (Push Notifications)' })
+  @ApiResponse({ status: 200, description: 'Token registrado correctamente' })
+  async registerToken(
+    @GetUser('id') userId: number,
+    @Body() body: { token: string },
+  ) {
+    this.logger.log(`Registrando token para usuario ${userId}`);
+    await this.notificationsService.registerToken(userId, body.token);
+    return { success: true, message: 'Token registrado correctamente' };
   }
 
   @Post('send-test')

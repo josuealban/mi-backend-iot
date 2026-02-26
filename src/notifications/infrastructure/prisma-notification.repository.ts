@@ -56,4 +56,29 @@ export class PrismaNotificationRepository implements NotificationRepository {
             orderBy: { createdAt: 'desc' },
         });
     }
+
+    async create(data: {
+        userId: number;
+        alertId?: number;
+        title: string;
+        message: string;
+        type?: 'ALERT' | 'INFO' | 'WARNING' | 'SUCCESS';
+        sent?: boolean;
+    }): Promise<any> {
+        try {
+            return await this.prisma.notification.create({
+                data: {
+                    userId: data.userId,
+                    alertId: data.alertId,
+                    title: data.title,
+                    message: data.message,
+                    type: data.type || 'ALERT',
+                    sent: data.sent ?? false,
+                },
+            });
+        } catch (error) {
+            this.logger.error('Error creating notification in database', error);
+            throw error;
+        }
+    }
 }

@@ -8,8 +8,9 @@ export class NotificationsService {
 
   constructor(private readonly prismaService: PrismaService) { }
 
-  findAll() {
+  findAll(userId: number) {
     return this.prismaService.notification.findMany({
+      where: { userId },
       include: {
         alert: {
           include: {
@@ -20,6 +21,13 @@ export class NotificationsService {
       orderBy: {
         createdAt: 'desc'
       }
+    });
+  }
+
+  async registerToken(userId: number, token: string) {
+    return this.prismaService.user.update({
+      where: { id: userId },
+      data: { deviceToken: token },
     });
   }
 }

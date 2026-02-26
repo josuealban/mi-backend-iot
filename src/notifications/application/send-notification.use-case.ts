@@ -40,7 +40,7 @@ export class SendNotificationUseCase {
 
             const selectedSound = sounds[severity as keyof typeof sounds] || 'default';
 
-            // Enviar la notificación con todos los datos y el sonido seleccionado
+            // 1. Enviar la notificación push a través de Firebase
             const response = await this.firebaseService.sendPushNotification(
                 user.device_token,
                 title,
@@ -48,6 +48,19 @@ export class SendNotificationUseCase {
                 data,
                 selectedSound
             );
+
+            // 2. Guardar en la base de datos para el historial
+            // Intentamos extraer alertId si viene en la data
+            const alertId = data?.alertId ? parseInt(data.alertId) : undefined;
+
+            await this.notificationRepo.create({
+                userId,
+                alertId,
+                title,
+                message: body,
+                type: 'ALERT',
+                sent: !!response,
+            });
 
             return { success: true, response };
         } catch (error) {
