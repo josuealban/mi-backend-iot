@@ -173,4 +173,16 @@ export class SensorDataController {
             message: 'Comando de calibración enviado al dispositivo.'
         };
     }
+
+    @Get('history')
+    @UseGuards(JwtAuthGuard)
+    @ApiOperation({ summary: 'Obtener historial de alertas del usuario' })
+    @ApiResponse({ status: 200, description: 'Historial de alertas obtenido' })
+    async getHistory(@GetUser('id') userId: number) {
+        const history = await this.sensorDataService.getAlertHistory(userId);
+        return {
+            success: true,
+            data: history,
+        };
+    }
 }

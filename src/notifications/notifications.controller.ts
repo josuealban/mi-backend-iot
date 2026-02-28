@@ -1,4 +1,4 @@
-import { Controller, Post, Body, UseGuards, Logger, Get, Req } from '@nestjs/common';
+import { Controller, Post, Body, UseGuards, Logger, Get, Patch, Param, ParseIntPipe } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiSecurity, ApiResponse } from '@nestjs/swagger';
 import { AuthGuard } from '@nestjs/passport';
 import { SendNotificationUseCase } from './application/send-notification.use-case';
@@ -54,5 +54,22 @@ export class NotificationsController {
       body.body,
       body.data,
     );
+  }
+
+  @Patch(':id/read')
+  @UseGuards(JwtAuthGuard)
+  @ApiSecurity('bearer')
+  @ApiOperation({ summary: 'Marcar una notificación como leída' })
+  async markAsRead(@Param('id', ParseIntPipe) id: number) {
+    return this.notificationsService.markAsRead(id);
+  }
+
+  @Patch('read-all')
+  @UseGuards(JwtAuthGuard)
+  @ApiSecurity('bearer')
+  @ApiOperation({ summary: 'Marcar todas las notificaciones como leídas' })
+  async markAllAsRead(@GetUser('id') userId: number) {
+    await this.notificationsService.markAllAsRead(userId);
+    return { success: true };
   }
 }

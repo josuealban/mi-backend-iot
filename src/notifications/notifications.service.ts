@@ -30,4 +30,18 @@ export class NotificationsService {
       data: { deviceToken: token },
     });
   }
+
+  async markAsRead(notificationId: number) {
+    return this.prismaService.notification.update({
+      where: { id: notificationId },
+      data: { read: true },
+    });
+  }
+
+  async markAllAsRead(userId: number) {
+    return this.prismaService.notification.updateMany({
+      where: { userId, read: false },
+      data: { read: true },
+    });
+  }
 }

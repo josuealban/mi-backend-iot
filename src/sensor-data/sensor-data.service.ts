@@ -260,6 +260,25 @@ export class SensorDataService {
     }
 
     /**
+     * Obtiene el historial de alertas de todos los dispositivos de un usuario
+     */
+    async getAlertHistory(userId: number) {
+        return this.prisma.alert.findMany({
+            where: {
+                device: {
+                    userId: userId
+                }
+            },
+            include: {
+                device: true
+            },
+            orderBy: {
+                createdAt: 'desc'
+            }
+        });
+    }
+
+    /**
      * Envía comando de calibración remota al ESP32
      */
     async remoteCalibration(deviceKey: string) {
