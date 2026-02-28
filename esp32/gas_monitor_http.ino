@@ -109,12 +109,14 @@ float calculateRs(float voltage) {
   return ((VCC - voltage) / voltage) * RL_VALUE;
 }
 
-float calculatePPM(float rs, float r0, float a, float b) {
+float calculatePPM(float rs, float r0, float a, float b, float cleanAirRatio) {
   if (r0 <= 0 || rs <= 0.01)
     return 0;
   float ratio = rs / r0;
   float ppm = a * pow(ratio, b);
-  return (ppm < 0) ? 0 : (ppm > 10000 ? 10000 : ppm);
+  float cleanAirPpm = a * pow(cleanAirRatio, b);
+  float adjustedPpm = ppm - cleanAirPpm;
+  return (adjustedPpm < 0) ? 0 : (adjustedPpm > 10000 ? 10000 : adjustedPpm);
 }
 
 int readSensorAvg(int pin) {
@@ -126,12 +128,13 @@ int readSensorAvg(int pin) {
   return total / 10;
 }
 
-SensorReading readMQSensor(int pin, float r0, float a, float b) {
+SensorReading readMQSensor(int pin, float r0, float a, float b,
+                           float cleanAirRatio) {
   SensorReading reading;
   reading.raw = readSensorAvg(pin);
   reading.voltage = adcToVoltage(reading.raw);
   reading.rs = calculateRs(reading.voltage);
-  reading.ppm = calculatePPM(reading.rs, r0, a, b);
+  reading.ppm = calculatePPM(reading.rs, r0, a, b, cleanAirRatio);
   return reading;
 }
 
@@ -153,7 +156,8 @@ void playBuzzerPattern(String severity) {
 void getConfig() {
   if (WiFi.status() != WL_CONNECTED)
     return;
-  WiFiClient client;
+  WiFiClientSecure client;
+  client.setInsecure(); // No validar el certificado SSL
   HTTPClient http;
   if (http.begin(client, configUrl)) {
     int httpCode = http.GET();
@@ -179,7 +183,8 @@ void getConfig() {
 
 void updateConfigInBackend() {
   if (WiFi.status() == WL_CONNECTED) {
-    WiFiClient client;
+    WiFiClientSecure client;
+    client.setInsecure(); // No validar el certificado SSL
     HTTPClient http;
     http.begin(client, configUrl);
     http.addHeader("Content-Type", "application/json");
@@ -229,12 +234,13 @@ void calibrateAllSensors() {
                 r0_MQ3, r0_MQ5, r0_MQ9);
 
   // Leer PPM base del ambiente con los R0 recién calibrados
-  SensorReading baseMQ2 = readMQSensor(MQ2_PIN, r0_MQ2, 574.25, -2.222);
-  SensorReading baseMQ3 = readMQSensor(MQ3_PIN, r0_MQ3, 200.0, -1.4);
-  SensorReading baseMQ5 = readMQSensor(MQ5_PIN, r0_MQ5, 500.0, -2.5);
-  SensorReading baseMQ9 = readMQSensor(MQ9_PIN, r0_MQ9, 800.0, -2.0);
+  SensorReading baseMQ2 = readMQSensor(MQ2_PIN, r0_MQ2, 574.25, -2.222, 9.83);
+  SensorReading baseMQ3 = readMQSensor(MQ3_PIN, r0_MQ3, 200.0, -1.4, 60.0);
+  SensorReading baseMQ5 = readMQSensor(MQ5_PIN, r0_MQ5, 500.0, -2.5, 6.5);
+  SensorReading baseMQ9 = readMQSensor(MQ9_PIN, r0_MQ9, 800.0, -2.0, 9.0);
 
-  Serial.printf("[CALIB] PPM base -> MQ2:%.1f MQ3:%.1f MQ5:%.1f MQ9:%.1f\n",
+  Serial.printf("[CALIB] PPM base (debe ser aprox 0) -> MQ2:%.1f MQ3:%.1f "
+                "MQ5:%.1f MQ9:%.1f\n",
                 baseMQ2.ppm, baseMQ3.ppm, baseMQ5.ppm, baseMQ9.ppm);
 
   // Umbrales = 3x el nivel base del ambiente (con minimos de seguridad)
@@ -251,9 +257,11 @@ void calibrateAllSensors() {
   updateConfigInBackend();
 }
 
-void sendGasAlert(String gasType, float ppm, float voltage, int raw) {
+void sendGasAlert(String gasType, float ppm, float voltage, int raw,
+                  String sensorSource) {
   if (WiFi.status() == WL_CONNECTED) {
-    WiFiClient client;
+    WiFiClientSecure client;
+    client.setInsecure(); // No validar el certificado SSL
     HTTPClient http;
     http.begin(client, alertUrl);
     http.addHeader("Content-Type", "application/json");
@@ -265,7 +273,7 @@ void sendGasAlert(String gasType, float ppm, float voltage, int raw) {
     doc["gasConcentrationPpm"] = ppm;
     doc["voltage"] = voltage;
     doc["rawValue"] = raw;
-    doc["sensorSource"] = "ESP32_INTERNAL";
+    doc["sensorSource"] = sensorSource;
 
     String json;
     serializeJson(doc, json);
@@ -283,12 +291,12 @@ void sendGasAlert(String gasType, float ppm, float voltage, int raw) {
 
 void streamSensorData() {
   // Leer los 4 sensores
-  SensorReading mq2 = readMQSensor(MQ2_PIN, r0_MQ2, 574.25, -2.222);
-  SensorReading mq3 =
-      readMQSensor(MQ3_PIN, r0_MQ3, 200.0, -1.4); // +sensible (antes 150, -1.5)
-  SensorReading mq5 = readMQSensor(MQ5_PIN, r0_MQ5, 500.0, -2.5);
-  SensorReading mq9 =
-      readMQSensor(MQ9_PIN, r0_MQ9, 800.0, -2.0); // +sensible (antes 600, -2.2)
+  SensorReading mq2 = readMQSensor(MQ2_PIN, r0_MQ2, 574.25, -2.222, 9.83);
+  SensorReading mq3 = readMQSensor(MQ3_PIN, r0_MQ3, 200.0, -1.4,
+                                   60.0); // +sensible (antes 150, -1.5)
+  SensorReading mq5 = readMQSensor(MQ5_PIN, r0_MQ5, 500.0, -2.5, 6.5);
+  SensorReading mq9 = readMQSensor(MQ9_PIN, r0_MQ9, 800.0, -2.0,
+                                   9.0); // +sensible (antes 600, -2.2)
   float temp = dht.readTemperature();
   float hum = dht.readHumidity();
 
@@ -390,8 +398,17 @@ void streamSensorData() {
     wsData["mq5"]["raw"] = mq5.raw;
     wsData["mq9"]["ppm"] = round(mq9.ppm * 100) / 100.0;
     wsData["mq9"]["raw"] = mq9.raw;
-    wsData["temperature"] = isnan(temp) ? 0 : round(temp * 10) / 10.0;
-    wsData["humidity"] = isnan(hum) ? 0 : round(hum * 10) / 10.0;
+    if (isnan(temp)) {
+      wsData["temperature"] = nullptr;
+    } else {
+      wsData["temperature"] = round(temp * 10) / 10.0;
+    }
+
+    if (isnan(hum)) {
+      wsData["humidity"] = nullptr;
+    } else {
+      wsData["humidity"] = round(hum * 10) / 10.0;
+    }
 
     String output;
     serializeJson(doc, output);
@@ -423,7 +440,7 @@ void streamSensorData() {
     lastAlertTime_MQ2 = now;
     lastSentPpm_MQ2 = mq2.ppm;
     sendGasAlert((mq2.ppm > 500) ? "SMOKE" : "LPG", mq2.ppm, mq2.voltage,
-                 mq2.raw);
+                 mq2.raw, "MQ2");
     alertSent = true;
   }
   yield();
@@ -431,7 +448,7 @@ void streamSensorData() {
       shouldAlert(mq3.ppm, lastSentPpm_MQ3, lastAlertTime_MQ3, THRESHOLD_MQ3)) {
     lastAlertTime_MQ3 = now;
     lastSentPpm_MQ3 = mq3.ppm;
-    sendGasAlert("ALCOHOL", mq3.ppm, mq3.voltage, mq3.raw);
+    sendGasAlert("ALCOHOL", mq3.ppm, mq3.voltage, mq3.raw, "MQ3");
     alertSent = true;
   }
   yield();
@@ -439,7 +456,7 @@ void streamSensorData() {
       shouldAlert(mq5.ppm, lastSentPpm_MQ5, lastAlertTime_MQ5, THRESHOLD_MQ5)) {
     lastAlertTime_MQ5 = now;
     lastSentPpm_MQ5 = mq5.ppm;
-    sendGasAlert("METHANE", mq5.ppm, mq5.voltage, mq5.raw);
+    sendGasAlert("METHANE", mq5.ppm, mq5.voltage, mq5.raw, "MQ5");
     alertSent = true;
   }
   yield();
@@ -448,7 +465,7 @@ void streamSensorData() {
     lastAlertTime_MQ9 = now;
     lastSentPpm_MQ9 = mq9.ppm;
     sendGasAlert((mq9.ppm > 150.0) ? "SMOKE" : "CO", mq9.ppm, mq9.voltage,
-                 mq9.raw);
+                 mq9.raw, "MQ9");
     alertSent = true;
   }
 }
