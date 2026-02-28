@@ -34,12 +34,12 @@ struct SensorReading {
 // ==========================================
 // CONFIGURACIÓN DE RED Y SERVIDOR
 // ==========================================
-const char *WIFI_SSID = "Vero";
-const char *WIFI_PASSWORD = "j26v2782";
+const char *WIFI_SSID = "josue";
+const char *WIFI_PASSWORD = "josue4657";
 
-const char *SERVER_HOSTNAME = "192.168.101.10";
-const int SERVER_PORT = 3000;
-const char *BASE_URL = "http://192.168.101.10:3000";
+const char *SERVER_HOSTNAME = "mi-backend-iot.onrender.com";
+const int SERVER_PORT = 443;
+const char *BASE_URL = "https://mi-backend-iot.onrender.com";
 const char *DEVICE_KEY = "00d6644c-3785-4a2d-ae71-1ec6c81b1a9a";
 
 // ==========================================
@@ -539,8 +539,8 @@ void setup() {
   windowServo.attach(WINDOW_SERVO_PIN, 500, 2400);
   windowServo.write(0); // Cerrada al iniciar
 
-  socketIO.begin(SERVER_HOSTNAME, SERVER_PORT,
-                 "/socket.io/?EIO=4&transport=websocket");
+  socketIO.beginSSL(SERVER_HOSTNAME, SERVER_PORT,
+                    "/socket.io/?EIO=4&transport=websocket");
   socketIO.onEvent(socketIOEvent);
 
   Serial.println("[WS] 🔌 Iniciando conexión...");
