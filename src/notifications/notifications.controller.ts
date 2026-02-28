@@ -33,9 +33,22 @@ export class NotificationsController {
     @GetUser('id') userId: number,
     @Body() body: { token: string },
   ) {
-    this.logger.log(`Registrando token para usuario ${userId}`);
+    this.logger.log(`Registrando token para usuario ${userId}: ${body.token?.substring(0, 20)}...`);
     await this.notificationsService.registerToken(userId, body.token);
     return { success: true, message: 'Token registrado correctamente' };
+  }
+
+  @Get('token-status')
+  @UseGuards(JwtAuthGuard)
+  @ApiSecurity('bearer')
+  @ApiOperation({ summary: 'Verificar si el usuario tiene token FCM registrado' })
+  async getTokenStatus(@GetUser('id') userId: number) {
+    const user = await this.notificationsService.getTokenStatus(userId);
+    return {
+      userId,
+      hasToken: !!user?.deviceToken,
+      tokenPreview: user?.deviceToken ? `${user.deviceToken.substring(0, 30)}...` : null,
+    };
   }
 
   @Post('send-test')

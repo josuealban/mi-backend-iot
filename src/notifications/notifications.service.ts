@@ -31,6 +31,13 @@ export class NotificationsService {
     });
   }
 
+  async getTokenStatus(userId: number) {
+    return this.prismaService.user.findUnique({
+      where: { id: userId },
+      select: { deviceToken: true },
+    });
+  }
+
   async markAsRead(notificationId: number) {
     return this.prismaService.notification.update({
       where: { id: notificationId },
